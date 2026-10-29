@@ -6,7 +6,7 @@
 
 ## 解决什么问题
 
-个人维护几台服务器时，常见痛点是：
+使用 AI 维护服务器时，常见痛点是：
 
 - 每条命令重新握手，慢且打断排查节奏；
 - AI 一次读整段日志，主会话上下文很快被淹没；
@@ -73,14 +73,16 @@ dsh plugin --profile <profile> list
 
 ## 使用
 
-先在 `~/.ssh/config` 配好主机和 IdentityFile，然后直接对 AI 说：
+先在 `~/.ssh/config` 配好主机和 IdentityFile，然后直接用自然语言对 AI 说，不需要点名工具：
 
 ```text
-用 ssh_hosts 看看有哪些服务器
-用 ssh_run 在 server-a 上查最近 10 分钟的日志
-用 ssh_check 检查 server-a 的健康状态
+帮我看看有哪些服务器
+查一下 server-a 最近 10 分钟的日志
+检查一下 server-a 的健康状态
 帮我在 server-b 上安装这个本地 deb 包
 ```
+
+AI 会根据场景自动选择工具；下面的清单只是便于你了解它能做什么。
 
 常用工具：
 
