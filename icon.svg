@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="SSH connection pool">
+  <title>SSH connection pool</title>
+  <desc>Several multiplexed channels sharing one long-lived, kept-alive SSH transport between a client and a remote host.</desc>
+  <defs>
+    <linearGradient id="sshPoolPipe" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#155e75"/>
+      <stop offset="1" stop-color="#0e7490"/>
+    </linearGradient>
+  </defs>
+
+  <!-- static icon frame; no theme tokens, no external references -->
+  <rect x="1" y="1" width="62" height="62" rx="14" fill="#0f172a" stroke="#334155" stroke-width="2"/>
+
+  <!-- local client -->
+  <rect x="6" y="21" width="9" height="22" rx="2.5" fill="#e2e8f0"/>
+  <rect x="8.5" y="25" width="4" height="2" rx="1" fill="#0f172a" opacity="0.55"/>
+  <rect x="8.5" y="37" width="4" height="2" rx="1" fill="#0f172a" opacity="0.55"/>
+
+  <!-- remote host -->
+  <rect x="49" y="15" width="9" height="34" rx="2.5" fill="#e2e8f0"/>
+  <rect x="51.5" y="20" width="4" height="2" rx="1" fill="#0f172a" opacity="0.55"/>
+  <rect x="51.5" y="31" width="4" height="2" rx="1" fill="#0f172a" opacity="0.55"/>
+  <rect x="51.5" y="42" width="4" height="2" rx="1" fill="#0f172a" opacity="0.55"/>
+
+  <!-- multiplexed channels over one transport -->
+  <g stroke="#7dd3fc" stroke-width="1.75" stroke-linecap="round" fill="none">
+    <path d="M15 22 H49"/>
+    <path d="M15 32 H49"/>
+    <path d="M15 42 H49"/>
+  </g>
+  <path d="M45.5 18.6 L49.4 22 L45.5 25.4 Z" fill="#7dd3fc"/>
+  <path d="M18.5 28.6 L14.6 32 L18.5 35.4 Z" fill="#7dd3fc"/>
+
+  <!-- the single long-lived, kept-alive SSH transport -->
+  <rect x="29" y="10" width="6" height="44" rx="3" fill="url(#sshPoolPipe)" stroke="#22d3ee" stroke-width="1.25"/>
+
+  <!-- keepalive heartbeat -->
+  <circle cx="32" cy="13.5" r="1.6" fill="#22d3ee"/>
+  <circle cx="32" cy="13.5" r="3.4" fill="none" stroke="#22d3ee" stroke-width="1" opacity="0.55"/>
+  <circle cx="32" cy="13.5" r="5.2" fill="none" stroke="#22d3ee" stroke-width="0.9" opacity="0.28"/>
+
+  <!-- reconnect/persistence pulse at the base of the transport -->
+  <path d="M32 46 V50" stroke="#22d3ee" stroke-width="1.25" stroke-linecap="round" opacity="0.75"/>
+  <circle cx="32" cy="51.5" r="1.3" fill="#22d3ee" opacity="0.75"/>
+</svg>

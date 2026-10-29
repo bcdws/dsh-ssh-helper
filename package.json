@@ -1,0 +1,63 @@
+{
+  "name": "dsh-ssh-helper",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Persistent SSH connection pool, SSH assistant UI, and a single machine-destruction guard for DeepSeek Harness",
+  "license": "MIT",
+  "keywords": [
+    "dsh-plugin",
+    "dsh",
+    "deepseek-harness",
+    "ssh",
+    "ssh2",
+    "sftp",
+    "server-ops"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bcdws/dsh-ssh-helper.git"
+  },
+  "homepage": "https://github.com/bcdws/dsh-ssh-helper#readme",
+  "bugs": {
+    "url": "https://github.com/bcdws/dsh-ssh-helper/issues"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "lib/**/*.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "ssh2": "^1.16.0"
+  },
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
+  "scripts": {
+    "test": "node test/run.mjs",
+    "test:offline": "node test/run.mjs --offline",
+    "test:live": "node test/run.mjs --live"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  }
+}

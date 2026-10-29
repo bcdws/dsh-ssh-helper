@@ -1,0 +1,52 @@
+# Host-level SSH connection pool and assistant. The point of this bundle is the
+# pooled transport: one authenticated SSH connection per host, opened on first
+# use and reused by every later call, so no command ever pays a second
+# handshake. Every session and every agent gets the same 9 pooled SSH tools
+# (ssh_hosts / ssh_run / ssh_read / ssh_write / ssh_edit / ssh_glob /
+# ssh_grep / ssh_check / ssh_transfer), and the Web UI
+# exposes the SSH assistant panel. The tool list is frozen; no more are added.
+# Hosts default to ~/.ssh/config minus forge entries; every value below is
+# optional. What the assistant edits itself — per-host hidden / remark / idle
+# timeout, plus the four global settings (idleTimeoutMs, maxOutputBytes,
+# transferTimeoutMs, sshVisible) — is persisted under
+# $DSH_HOME/ssh-pool/state.json instead of this file. The values here seed the
+# first run; a value saved by the panel wins afterwards.
+- insert:
+    - id: ssh-pool
+      name: 'dsh-ssh-helper'
+      config:
+        useSshConfig: true
+        exclude:
+          - github.com
+          - gitee.com
+          - gitlab.com
+          - bitbucket.org
+          - ssh.dev.azure.com
+        include: []
+        hosts: []
+        connectTimeoutMs: 15000
+        keepaliveIntervalMs: 15000
+        keepaliveCountMax: 4
+        # 0 = keep the pooled connection until the process exits. A connection
+        # is never created until a session actually uses it.
+        idleTimeoutMs: 0
+        autoConnect: []
+        maxChannelsPerHost: 4
+        # Estimate used when the command shape says nothing. It only feeds the
+        # derivation, it is not a fixed timeout.
+        defaultTimeoutMs: 30000
+        transferTimeoutMs: 600000
+        maxOutputBytes: 32768
+        # warn: an unknown host is allowed with a warning; a CHANGED key is
+        # refused in both warn and strict (a changed key is the MITM shape).
+        hostKeyPolicy: warn
+        # Command deadlines are derived: estimate x 3, clamped to 5s..30min
+        # (constants in lib/timeouts.js; not configurable).
+        #
+        # Command guard: one policy for every host. It refuses only commands that
+        # would make the machine unbootable — recursive/glob deletion of a
+        # system tree, mkfs/partitioning, dd or > onto a block device,
+        # overwriting a system file, recursive chmod/chown of a system tree.
+        # Business paths (/srv, /home, /opt, /var/www, /data) and ordinary
+        # maintenance are allowed. The same target check also guards SFTP writes
+        # to block devices and /boot, /proc, /sys.

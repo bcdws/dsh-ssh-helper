@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "SSH Connection Pool",
+    "description": "Persistent SSH connections for personal server operations: pooled handshakes, session isolation, log analysis, and a guard that only blocks machine-destruction commands."
+  }
+}

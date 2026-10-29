@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Logs and local artifacts
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local secrets and machine-specific state
+.env
+.env.*
+*.pem
+*.key
+
+# Build output that is generated on demand
+dist/
+coverage/
+*.tgz
+
+# Local research material (not shipped)
+analysis/
