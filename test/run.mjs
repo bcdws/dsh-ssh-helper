@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const OFFLINE = ['schema.test.mjs', 'tools.test.mjs', 'policy-state.test.mjs', 'store.test.mjs', 'timeouts.test.mjs', 'permissions.test.mjs', 'files.test.mjs', 'hostmeta.test.mjs', 'safety.test.mjs', 'api.test.mjs', 'activation.test.mjs', 'pool.test.mjs', 'backoff.test.mjs', 'diagnostics.test.mjs', 'analysis.test.mjs', 'client-render.test.mjs', 'policy.test.mjs', 'redact.test.mjs'];
+const OFFLINE = ['schema.test.mjs', 'tools.test.mjs', 'policy-state.test.mjs', 'store.test.mjs', 'timeouts.test.mjs', 'permissions.test.mjs', 'files.test.mjs', 'hostmeta.test.mjs', 'safety.test.mjs', 'api.test.mjs', 'activation.test.mjs', 'pool.test.mjs', 'backoff.test.mjs', 'sftp.test.mjs', 'diagnostics.test.mjs', 'analysis.test.mjs', 'client-render.test.mjs', 'policy.test.mjs', 'redact.test.mjs'];
 const LIVE = ['smoke.mjs', 'race.mjs', 'errors.mjs'];
 
 const mode = process.argv.includes('--offline') ? 'offline' : process.argv.includes('--live') ? 'live' : 'all';
