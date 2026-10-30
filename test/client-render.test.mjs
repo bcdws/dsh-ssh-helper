@@ -43,7 +43,7 @@ const hosts = [
   {
     alias: 'db-host', host: '203.0.113.11', port: 22, user: 'root', keyName: 'db-host_rsa',
     state: 'idle', connected: false, connectedSeconds: 0, idleSeconds: null, connects: 0, reconnects: 0, failures: 0,
-    sessions: [], hidden: true, remark: '', idleTimeoutMs: null,
+    sessions: [], hidden: true, retryPaused: true, handshakeTimeouts: 6, remark: '', idleTimeoutMs: null,
     effectiveIdleTimeoutMs: 0, lastError: 'ssh host "db-host" failed: timeout'
   }
 ];
@@ -127,6 +127,7 @@ check('settings-grouped', byClass(tree, 'ssh-group').length === 2 && byClass(tre
 check('policy-is-prose', byClass(tree, 'ssh-prose').length === 1, `${byClass(tree, 'ssh-prose').length} prose blocks`);
 check('policy-not-a-setting-row', byClass(tree, 'ssh-prose').every((block) => byClass(block, 'ssh-setrow').length === 0), 'policy must not reuse the settings grid');
 check('privacy-note', /敏感日志/.test(textOf(tree)), 'log analysis must disclose that logs are sent to the model provider');
+check('paused-retry-label', /已暂停/.test(textOf(tree)) && /重试/.test(textOf(tree)), 'paused host must show retry');
 
 // No text key may leak into the UI as raw text.
 const rendered = textOf(tree);

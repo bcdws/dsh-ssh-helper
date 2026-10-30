@@ -114,6 +114,11 @@ check('session-umask-captured', script.startsWith('__dsh_umask=$(umask)\n'), scr
 check('session-umask-restored-before-command', commandAt > 0 && restoreBefore > 0, script.slice(0, 400));
 check('session-umask-reapplied-for-state', script.indexOf('umask 077', commandAt) > commandAt, script.slice(-400));
 
+// 4b. Host status exposes the reconnect pause state.
+const pausedSnapshot = makeConnection();
+connections.push(pausedSnapshot);
+check('snapshot-retry-fields', pausedSnapshot.snapshot().retryPaused === false && pausedSnapshot.snapshot().handshakeTimeouts === 0, JSON.stringify(pausedSnapshot.snapshot()));
+
 // 5. The busy flag used by the idle reaper.
 const busy = makeConnection();
 connections.push(busy);

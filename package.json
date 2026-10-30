@@ -1,6 +1,6 @@
 {
   "name": "dsh-ssh-helper",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Persistent SSH connection pool, SSH assistant UI, and a single machine-destruction guard for DeepSeek Harness",
   "license": "MIT",

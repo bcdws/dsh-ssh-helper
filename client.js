@@ -51,6 +51,8 @@ window.__ModuleLoader__.load({
       connecting: '连接中',
       idle: '未连接',
       down: '已断开',
+      retryPaused: '已暂停',
+      retry: '重试',
       remarkPlaceholder: '备注…',
       sessionsUnit: '会话',
       commandsUnit: '命令',
@@ -209,7 +211,7 @@ window.__ModuleLoader__.load({
 
     const statusColor = (state) => {
       if (state === 'ready') return 'var(--dsw-alias-state-success-primary)';
-      if (state === 'connecting') return 'var(--dsw-alias-state-warn-primary)';
+      if (state === 'connecting' || state === 'paused') return 'var(--dsw-alias-state-warn-primary)';
       return 'var(--dsw-alias-state-idle-primary)';
     };
     /** The panel title used outside React. */
@@ -362,7 +364,7 @@ window.__ModuleLoader__.load({
       const row = (host) => {
         const remark = draft[`remark:${host.alias}`] ?? host.remark ?? '';
         const idleDraft = draft[`idle:${host.alias}`] ?? seconds(host.idleTimeoutMs);
-        const stateLabel = host.state === 'ready' ? t('connected') : host.state === 'connecting' ? t('connecting') : host.state === 'down' ? t('down') : t('idle');
+        const stateLabel = host.retryPaused === true ? t('retryPaused') : host.state === 'ready' ? t('connected') : host.state === 'connecting' ? t('connecting') : host.state === 'down' ? t('down') : t('idle');
         // Compact in the row, complete in the tooltip. A stateless command leaves
         // no session behind, so the command count is what shows the host was used.
         const stats = [
@@ -374,7 +376,7 @@ window.__ModuleLoader__.load({
           'div',
           { className: 'ssh-row', key: host.alias },
           h('span', { className: 'ssh-id' },
-            h('span', { className: 'ssh-dot', style: { background: statusColor(host.state) }, title: host.lastError ?? stateLabel }),
+            h('span', { className: 'ssh-dot', style: { background: statusColor(host.retryPaused === true ? 'paused' : host.state) }, title: host.lastError ?? stateLabel }),
             h('span', { className: 'ssh-name ssh-ell', title: host.alias }, host.alias),
             h('span', { className: 'ssh-muted ssh-ell', title: `${host.user}@${host.host}:${host.port}` }, `${host.user}@${host.host}:${host.port}`)
           ),
@@ -429,11 +431,11 @@ window.__ModuleLoader__.load({
             ),
             h('button', {
               className: `ssh-btn${host.state === 'ready' ? '' : ' ssh-btn-primary'}`,
-              title: host.state === 'ready' ? t('closeConnection') : t('open'),
+              title: host.state === 'ready' ? t('closeConnection') : host.retryPaused === true ? t('retry') : t('open'),
               onClick: () => call('action', { action: host.state === 'ready' ? 'close' : 'open', alias: host.alias })
             },
               h('span', { className: host.state === 'ready' ? 'ssh-ico-stop' : 'ssh-ico-connect', style: { display: 'flex' } }, host.state === 'ready' ? ICONS.stop() : ICONS.connect()),
-              host.state === 'ready' ? t('closeConnection') : t('open')
+              host.state === 'ready' ? t('closeConnection') : host.retryPaused === true ? t('retry') : t('open')
             )
           ),
           h('input', {
