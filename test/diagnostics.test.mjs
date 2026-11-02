@@ -52,6 +52,11 @@ invalid.record({ tool: '', host: 42, outcome: 'bogus', reason: 'bogus', duration
 const entry = invalid.snapshot().events[0];
 check('invalid-normalized', entry.tool === 'unknown' && entry.host === null && entry.outcome === 'error' && entry.reason === null && entry.durationMs === 0 && entry.bytes === 0 && entry.reused === null && entry.analysis === null, JSON.stringify(entry));
 
+const guards = createDiagnostics();
+guards.record({ tool: 'bash', outcome: 'denied', reason: 'local-ssh' });
+guards.record({ tool: 'ssh_run', outcome: 'denied', reason: 'plan' });
+check('guard-reasons', guards.snapshot().events[0].reason === 'local-ssh' && guards.snapshot().events[1].reason === 'plan', JSON.stringify(guards.snapshot().events));
+
 console.log(`${pass}/${pass + failures.length} passed`);
 for (const failure of failures) console.log(`FAIL ${failure}`);
 process.exit(failures.length === 0 ? 0 : 2);

@@ -20,7 +20,7 @@ const failures = [];
 const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: ${detail}`));
 
 /** A minimal Host context double. */
-function makeContext() {
+function makeContext(plan = { active: false, pending: false }) {
   const tools = [];
   const guards = [];
   const routes = [];
@@ -28,6 +28,7 @@ function makeContext() {
   const injections = new Map();
   const ctx = {
     logger: { info: () => {}, warn: () => {} },
+    get: (name) => (name === 'planMode' ? { get: () => plan } : undefined),
     tools: {
       register: (tool) => {
         tools.push(tool.name);
@@ -87,7 +88,19 @@ const deny = visible.guards[0]({ name: 'ssh_run', arguments: { host: 'web-host',
 check('guard-denies-danger', typeof deny === 'string' && deny.includes('danger.rm-root'), String(deny));
 const allow = visible.guards[0]({ name: 'ssh_run', arguments: { host: 'web-host', command: 'tail -n 20 /var/log/messages' } });
 check('guard-allows-bounded', allow === undefined, String(allow));
-check('guard-ignores-other-tools', visible.guards[0]({ name: 'bash', arguments: { command: 'rm -rf /' } }) === undefined, 'guard leaked to bash');
+check('guard-ignores-non-ssh-bash', visible.guards[0]({ name: 'bash', arguments: { command: 'rm -rf /tmp/x' } }) === undefined, 'guard leaked to local non-ssh bash');
+const localDeny = visible.guards[0]({ name: 'bash', arguments: { command: 'ssh -i ~/.ssh/key root@host "rm -rf /data/x"' } });
+check('guard-denies-local-ssh-delete', typeof localDeny === 'string' && localDeny.includes('本地 bash'), String(localDeny));
+const localRead = visible.guards[0]({ name: 'bash', arguments: { command: 'ssh -i ~/.ssh/key root@host "ls -la /data"' } });
+check('guard-allows-local-ssh-read', localRead === undefined, String(localRead));
+
+// 2b. Plan mode is an explicit guard input: no delete-like ssh_run, reads allowed.
+const planned = makeContext({ active: true, pending: false });
+apply(planned.ctx, { useSshConfig: true, statePath: join(dir, 'planned.json') });
+const planDeny = planned.guards[0]({ name: 'ssh_run', agent: {}, arguments: { host: 'web-host', command: 'rm -rf /data/x' } });
+check('guard-denies-plan-delete', typeof planDeny === 'string' && planDeny.includes('计划模式'), String(planDeny));
+const planRead = planned.guards[0]({ name: 'ssh_run', agent: {}, arguments: { host: 'web-host', command: 'tail -n 20 /var/log/messages' } });
+check('guard-allows-plan-read', planRead === undefined, String(planRead));
 
 // 3. Visibility off: the tools are not registered at all, so no session can
 //    even see them; the panel's API still mounts.

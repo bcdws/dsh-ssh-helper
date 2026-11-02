@@ -18,6 +18,7 @@ import { SshPool } from './lib/pool.js';
 import { createTools } from './lib/tools.js';
 import { commandKind, createDiagnostics } from './lib/diagnostics.js';
 import { createAnalyzer } from './lib/analysis.js';
+import { isDeleteCommand, isLocalSshDelete, isPlanActive } from './lib/plan-guard.js';
 
 export const name = 'ssh-pool';
 export const inject = ['tools'];
@@ -37,6 +38,24 @@ export function denyMessage(verdict, alias = '') {
   ]
     .filter((line) => line.length > 0)
     .join('\n');
+}
+
+/** Denial for a delete attempted while plan mode is active or pending. */
+export function planDeleteMessage(alias = '') {
+  return [
+    '[ssh-pool plan] 计划模式下禁止删除',
+    `主机 ${alias || '?'}`,
+    '请先把计划提交审批；退出计划模式后，用 ssh_run 执行经过连接池和策略检查的删除。'
+  ].join('\n');
+}
+
+/** Denial for a local bash command that bypasses the pool with a raw ssh key. */
+export function localSshDeleteMessage() {
+  return [
+    '[ssh-pool guard] 本地 bash 直接调用 ssh 执行删除已被拒绝',
+    '这会绕过连接池、主机策略和诊断记录；请改用 ssh_run。',
+    '本地 ssh 的只读探查仍然允许，只有删除类操作被拦截。'
+  ].join('\n');
 }
 
 /**
@@ -97,10 +116,49 @@ export function apply(ctx, config = {}) {
 
     // The command policy runs as a guard: monotonic, synchronous, and applied
     // before any transport work, so no argument shape can slip past it.
+    //
+    // Plan mode is collaboration, not enforcement (DSH keeps every tool
+    // callable), so this guard adds the two SSH-specific limits:
+    //   - plan active/pending: no delete-like ssh_run;
+    //   - local bash + ssh + delete: always denied, even after plan approval,
+    //     because a raw local key bypasses the pool and its policy.
+    const planModeOf = () => {
+      try {
+        return typeof ctx.get === 'function' ? ctx.get('planMode') : ctx.planMode;
+      } catch {
+        return undefined;
+      }
+    };
     const unguard = ctx.tools.guard((execution) => {
-      if (execution?.name !== 'ssh_run') return undefined;
-      const args = execution.arguments;
+      const toolName = execution?.name;
+      const args = execution?.arguments;
       if (args === null || typeof args !== 'object') return undefined;
+
+      if (toolName === 'bash') {
+        if (isLocalSshDelete(args.command)) {
+          diagnostics.record({
+            tool: 'bash',
+            host: null,
+            commandKind: typeof args.command === 'string' ? commandKind(args.command) : null,
+            outcome: 'denied',
+            reason: 'local-ssh'
+          });
+          return localSshDeleteMessage();
+        }
+        return undefined;
+      }
+
+      if (toolName !== 'ssh_run') return undefined;
+      if (isPlanActive(planModeOf(), execution.agent) && isDeleteCommand(args.command)) {
+        diagnostics.record({
+          tool: 'ssh_run',
+          host: typeof args.host === 'string' ? args.host : null,
+          commandKind: typeof args.command === 'string' ? commandKind(args.command) : null,
+          outcome: 'denied',
+          reason: 'plan'
+        });
+        return planDeleteMessage(args.host);
+      }
       const verdict = policy.evaluate({ alias: args.host, command: args.command, host: args.host });
       if (verdict.action === 'deny') {
         diagnostics.record({
