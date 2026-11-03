@@ -3,7 +3,7 @@
 # use and reused by every later call, so no command ever pays a second
 # handshake. Every session and every agent gets the same 9 pooled SSH tools
 # (ssh_hosts / ssh_run / ssh_read / ssh_write / ssh_edit / ssh_glob /
-# ssh_grep / ssh_check / ssh_transfer), and the Web UI
+# ssh_grep / ssh_transfer), and the Web UI
 # exposes the SSH assistant panel. The tool list is frozen; no more are added.
 # Hosts default to ~/.ssh/config minus forge entries; every value below is
 # optional. What the assistant edits itself — per-host hidden / remark / idle

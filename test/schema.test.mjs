@@ -30,7 +30,7 @@ let pass = 0;
 const failures = [];
 const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: ${detail}`));
 
-check('tool-count', tools.length === 9, JSON.stringify(tools.map((tool) => tool.name)));
+check('tool-count', tools.length === 8, JSON.stringify(tools.map((tool) => tool.name)));
 check(
   'file-tools-present',
   ['ssh_read', 'ssh_write', 'ssh_edit', 'ssh_glob', 'ssh_grep'].every((name) => tools.some((tool) => tool.name === name)),

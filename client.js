@@ -38,7 +38,7 @@ window.__ModuleLoader__.load({
       idleTimeoutDesc: '秒；0 = 永不自动断开。未使用时不创建连接，只有会话真正用到该主机才首次建连。',
       sshVisible: 'SSH 工具对会话可见',
       sshVisibleShort: '会话可见',
-      sshVisibleDesc: '总开关。关闭后 9 个 ssh_* 工具对任何会话（含子 agent）都不再存在，已建立的连接不受影响。',
+      sshVisibleDesc: '总开关。关闭后 8 个 ssh_* 工具对任何会话（含子 agent）都不再存在，已建立的连接不受影响。',
       maxOutputBytes: '命令输出上限',
       maxOutputBytesDesc: '每条命令回传的每个流（stdout / stderr）的字节上限，单位 KB；默认 32 KB，超出时保留头尾并标注省略。调小更省上下文。',
       logAnalysis: '日志旁路分析',

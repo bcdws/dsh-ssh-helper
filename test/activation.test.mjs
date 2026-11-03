@@ -72,7 +72,7 @@ function makeContext(plan = { active: false, pending: false }) {
 // 1. Visibility on (no state file): tools, guard, route and token are mounted.
 const visible = makeContext();
 apply(visible.ctx, { useSshConfig: true, statePath: visiblePath });
-check('tools-registered', visible.tools.length === 9, JSON.stringify(visible.tools));
+check('tools-registered', visible.tools.length === 8, JSON.stringify(visible.tools));
 check('guard-registered', visible.guards.length === 1, `${visible.guards.length} guards`);
 check('no-route-before-service', visible.routes.length === 0 && visible.injections.has('webServer'), `routes=${visible.routes.length}`);
 visible.provideWebServer();
