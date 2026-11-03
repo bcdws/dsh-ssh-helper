@@ -3,6 +3,7 @@ import { createAssistantApi } from '../lib/api.js';
 
 const calls = [];
 const settingsNotices = [];
+let hostRefreshes = 0;
 const hosts = new Map([
   ['web-host', { alias: 'web-host', hidden: false, remark: '', idleTimeoutMs: null }],
   ['prod-1', { alias: 'prod-1', hidden: true, remark: '', idleTimeoutMs: null }]
@@ -65,7 +66,8 @@ const api = createAssistantApi({
   store,
   config: { hostKeyPolicy: 'warn' },
   logger: undefined,
-  onSettingsChanged: () => settingsNotices.push(Date.now())
+  onSettingsChanged: () => settingsNotices.push(Date.now()),
+  refreshHosts: () => { hostRefreshes += 1; }
 });
 
 /** A minimal node-http request double. */
@@ -118,6 +120,7 @@ check('token-injected', /__DSH_SSH_ASSISTANT__=\{"token":"[0-9a-f]{48}"\}/.test(
 
 const state = await call({});
 check('get-state', state.status === 200 && state.payload.ok === true && state.payload.state.hosts.length === 2, JSON.stringify(state.payload).slice(0, 160));
+check('state-refreshes-hosts', hostRefreshes >= 1, String(hostRefreshes));
 check('state-has-no-key-path', !JSON.stringify(state.payload).includes('C:\\\\') && state.payload.state.hosts[0].keyName === 'web-host_rsa', 'only the key file name may cross the API');
 check('state-has-no-policy', state.payload.state.hosts.every((host) => host.policy === undefined), JSON.stringify(state.payload.state.hosts));
 check('state-has-no-activity-trail', state.payload.state.activity === undefined, JSON.stringify(state.payload.state.activity));

@@ -7,7 +7,7 @@
  * Every case uses a fake client; nothing here opens a socket.
  */
 import { EventEmitter } from 'node:events';
-import { HostConnection, ShellSession } from '../lib/pool.js';
+import { HostConnection, ShellSession, SshPool } from '../lib/pool.js';
 
 const spec = { alias: 'h', host: '127.0.0.1', port: 22, user: 'root', source: 'config' };
 const config = { connectTimeoutMs: 100, keepaliveIntervalMs: 0, keepaliveCountMax: 1, hostKeyPolicy: 'off', maxChannelsPerHost: 1 };
@@ -118,6 +118,28 @@ check('session-umask-reapplied-for-state', script.indexOf('umask 077', commandAt
 const pausedSnapshot = makeConnection();
 connections.push(pausedSnapshot);
 check('snapshot-retry-fields', pausedSnapshot.snapshot().retryPaused === false && pausedSnapshot.snapshot().handshakeTimeouts === 0, JSON.stringify(pausedSnapshot.snapshot()));
+
+// 4c. Refreshing the host table adds/changes/removes aliases and invalidates
+//     a changed host's connection.
+const refreshPool = new SshPool({
+  hosts: new Map([['h', { ...spec }]]),
+  config,
+  logger,
+  warnings: []
+});
+const oldConnection = refreshPool.connection('h');
+const refreshed = refreshPool.refreshHosts(
+  new Map([
+    ['h', { ...spec, identityFile: '/tmp/new-key' }],
+    ['h2', { ...spec, alias: 'h2' }]
+  ]),
+  []
+);
+check('refresh-adds-and-changes', refreshed.added.join(',') === 'h2' && refreshed.changed.join(',') === 'h' && refreshPool.has('h2'), JSON.stringify(refreshed));
+check('refresh-invalidates-changed-connection', refreshPool.connection('h') !== oldConnection, 'connection should be recreated');
+const removed = refreshPool.refreshHosts(new Map([['h2', { ...spec, alias: 'h2' }]]), []);
+check('refresh-removes', removed.removed.join(',') === 'h' && !refreshPool.has('h'), JSON.stringify(removed));
+refreshPool.dispose();
 
 // 5. The busy flag used by the idle reaper.
 const busy = makeConnection();

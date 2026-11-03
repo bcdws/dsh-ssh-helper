@@ -80,6 +80,27 @@ export function apply(ctx, config = {}) {
   const diagnostics = createDiagnostics();
   const analyzer = createAnalyzer(ctx, ctx.logger);
   const pool = new SshPool({ hosts, config: normalized, logger: ctx.logger, warnings, meta: store });
+  /**
+   * Rebuild the host table from OpenSSH config. Called by the panel on every
+   * state read so a host/key added locally appears without reloading the plugin.
+   * A missing or unreadable config is treated as "keep what we have": a
+   * transient read failure must never silently remove every host.
+   */
+  const refreshHosts = () => {
+    const next = buildHostTable(normalized);
+    const unreadable = next.warnings.some((warning) => warning.startsWith('cannot read') || warning.startsWith('ssh config not found'));
+    if (unreadable && pool.aliases.length > 0) {
+      pool.warnings = [...next.warnings];
+      return { added: [], changed: [], removed: [], skipped: true };
+    }
+    const diff = pool.refreshHosts(next.hosts, next.warnings);
+    if (diff.added.length > 0 || diff.changed.length > 0 || diff.removed.length > 0) {
+      ctx.logger?.info?.(
+        `ssh-pool: host table refreshed (added=${diff.added.length}, changed=${diff.changed.length}, removed=${diff.removed.length})`
+      );
+    }
+    return diff;
+  };
   for (const warning of warnings) ctx.logger?.warn?.(`ssh-pool: ${warning}`);
   ctx.logger?.info?.(
     `ssh-pool: ${hosts.size} host(s) available (${[...hosts.keys()].join(', ') || 'none'}), keepalive ${normalized.keepaliveIntervalMs}ms, idle timeout ${normalized.idleTimeoutMs === 0 ? 'never' : `${normalized.idleTimeoutMs}ms`}`
@@ -186,7 +207,8 @@ export function apply(ctx, config = {}) {
           logger: ctx.logger,
           analysisStatus: () => analyzer.status(),
           diagnostics: () => diagnostics.snapshot(),
-          onSettingsChanged: applyVisibility
+          onSettingsChanged: applyVisibility,
+          refreshHosts
         });
         const disposeRoute = webCtx.webServer.register(api.route);
         const disposeTap = webCtx.webServer.tapIndex((html) => html.replace(/<head(?:\s[^>]*)?>/i, (match) => `${match}${api.indexInjection}`));
