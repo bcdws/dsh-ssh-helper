@@ -35,13 +35,13 @@ module.apply(ctx);
 
 const hosts = [
   {
-    alias: 'web-host', host: '203.0.113.10', port: 22, user: 'root', keyName: 'web-host',
+    alias: 'web-host', host: '203.0.113.10', port: 22, user: 'root', keyName: 'web-host', source: 'ssh-config',
     state: 'ready', connected: true, connectedSeconds: 60, idleSeconds: 5, connects: 3, reconnects: 0, failures: 0,
     sessions: [{ name: 'main' }], hidden: false, remark: '生产 Web 主库',
     idleTimeoutMs: 30000, effectiveIdleTimeoutMs: 30000, lastError: null
   },
   {
-    alias: 'db-host', host: '203.0.113.11', port: 22, user: 'root', keyName: 'db-host_rsa',
+    alias: 'db-host', host: '203.0.113.11', port: 22, user: 'root', keyName: 'db-host_rsa', source: 'ssh-config',
     state: 'idle', connected: false, connectedSeconds: 0, idleSeconds: null, connects: 0, reconnects: 0, failures: 0,
     sessions: [], hidden: true, retryPaused: true, handshakeTimeouts: 6, remark: '', idleTimeoutMs: null,
     effectiveIdleTimeoutMs: 0, lastError: 'ssh host "db-host" failed: timeout'
@@ -76,7 +76,7 @@ const classesOf = (node) => String(node?.props?.className ?? '');
 const byClass = (tree, name) => collect(tree, (node) => classesOf(node).split(/\s+/).includes(name));
 
 // One panel render with the assistant already holding data.
-stateQueue.push(state, null, null, false, state.settings, {});
+stateQueue.push(state, null, null, false, state.settings, {}, state.hosts[0]);
 const panel = slots.find((entry) => entry.definition.name === 'main' && entry.definition.key === 'ssh-assistant');
 check('panel-registered', panel !== undefined, JSON.stringify(slots.map((entry) => entry.definition)));
 check('sidebar-row-registered', slots.some((entry) => entry.definition.name === 'sidebar.panellist' && entry.definition.id === 'ssh-assistant'), 'no sidebar entry');
@@ -94,10 +94,10 @@ const tree = expand(panel.component());
 check('renders-without-throwing', tree !== null && tree !== undefined, 'null tree');
 check('shell', byClass(tree, 'ssh-root').length === 1 && byClass(tree, 'ssh-content').length === 1, 'missing shell');
 check('rows-one-per-host', byClass(tree, 'ssh-row').length === 2, `${byClass(tree, 'ssh-row').length} rows`);
-check('no-header-row', byClass(tree, 'ssh-th').length === 0, 'the header row should be gone (labels are inline now)');
+check('header-row', byClass(tree, 'ssh-th').length === 1, `${byClass(tree, 'ssh-th').length} header rows`);
 check('no-production-mark', byClass(tree, 'ssh-tag').length === 0, 'there must be no production mark anywhere');
-check('row-identity', byClass(tree, 'ssh-id').length === 2, `${byClass(tree, 'ssh-id').length}`);
-check('row-controls', byClass(tree, 'ssh-controls').length === 2, `${byClass(tree, 'ssh-controls').length}`);
+check('row-identity', byClass(tree, 'ssh-row').every((row) => byClass(row, 'ssh-keycell').length === 1), 'each row needs one key cell');
+check('row-controls', byClass(tree, 'ssh-row').every((row) => byClass(row, 'ssh-controls').length === 1), 'each row needs one control cluster');
 check('row-switches', byClass(tree, 'ssh-mini').length === 3 && byClass(tree, 'ssh-switch').length === 4, `${byClass(tree, 'ssh-switch').length} switches / ${byClass(tree, 'ssh-mini').length} labelled inline controls`);
 
 // Settings rows: control — switch or number box — in the fixed left column,
@@ -134,7 +134,15 @@ const rendered = textOf(tree);
 const rawKey = ['sessionsUnit', 'sshVisibleDesc', 'sshVisibleShort', 'maxOutputBytesDesc', 'idleTimeoutDesc', 'connectionsHint', 'hiddenHint'].find((key) => rendered.includes(key));
 check('no-raw-keys', rawKey === undefined, `leaked ${rawKey}`);
 check('renders-chinese', rendered.includes('可见') && rendered.includes('隐藏') && rendered.includes('SSH 助手') && rendered.includes('命令护栏') && rendered.includes('日志旁路分析'), 'labels missing');
-check('shows-host-metadata', rendered.includes('web-host') && rendered.includes('203.0.113.10') && rendered.includes('生产 Web 主库') === false, 'row content missing (remark is an input value, not text)');
+check('shows-key-metadata', byClass(tree, 'ssh-keyname').some((node) => String(node.props.title).includes('web-host') && String(node.props.title).includes('203.0.113.10')), 'key cell title must identify the host');
+check('address-not-visible', byClass(tree, 'ssh-row').every((row) => !textOf(row).includes('root@203.0.113.10')), 'the row must show the host alias, not the address');
+check('host-editable', byClass(tree, 'ssh-keyname').length === 2, `${byClass(tree, 'ssh-keyname').length} host buttons`);
+const keyCells = byClass(tree, 'ssh-keyfile');
+check('key-editable', keyCells.length === 2 && keyCells.map((node) => textOf(node)).join('|') === 'web-host|db-host_rsa', `${keyCells.length} key cells: ${keyCells.map((node) => textOf(node)).join('|')}`);
+check('key-column-header', byClass(tree, 'ssh-th').some((head) => byClass(head, 'ssh-filecell').some((cell) => textOf(cell) === '密钥')), 'key column header missing');
+check('edit-dialog', byClass(tree, 'ssh-dialog').length === 1, 'edit dialog missing');
+check('edit-dialog-fields', byClass(tree, 'ssh-dialog-input').length === 2 && byClass(tree, 'ssh-dialog-input').map((node) => String(node.props.value)).join('|') === 'web-host|web-host', JSON.stringify(byClass(tree, 'ssh-dialog-input').map((node) => node.props.value)));
+check('edit-dialog-actions', /取消/.test(textOf(tree)) && /保存/.test(textOf(tree)), 'dialog action labels missing');
 
 // The profile select is gone: each host row carries one neutral hidden switch
 // with "visible" on the left and "hidden" on the right, and the panel header

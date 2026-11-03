@@ -4,6 +4,9 @@ import { createAssistantApi } from '../lib/api.js';
 const calls = [];
 const settingsNotices = [];
 let hostRefreshes = 0;
+let renamed = null;
+let renamedHost = null;
+let edited = null;
 const hosts = new Map([
   ['web-host', { alias: 'web-host', hidden: false, remark: '', idleTimeoutMs: null }],
   ['prod-1', { alias: 'prod-1', hidden: true, remark: '', idleTimeoutMs: null }]
@@ -67,7 +70,19 @@ const api = createAssistantApi({
   config: { hostKeyPolicy: 'warn' },
   logger: undefined,
   onSettingsChanged: () => settingsNotices.push(Date.now()),
-  refreshHosts: () => { hostRefreshes += 1; }
+  refreshHosts: () => { hostRefreshes += 1; },
+  renameKey: async ({ alias, keyName }) => {
+    renamed = { alias, keyName };
+    return { changed: true, oldName: 'web-host', newName: keyName, references: 1 };
+  },
+  renameHost: async ({ alias, newAlias }) => {
+    renamedHost = { alias, newAlias };
+    return { changed: true, oldAlias: alias, newAlias, references: 1 };
+  },
+  editHost: async ({ alias, newAlias, keyName }) => {
+    edited = { alias, newAlias, keyName };
+    return { changed: true, aliasChanged: Boolean(newAlias), keyChanged: Boolean(keyName), references: 1 };
+  }
 });
 
 /** A minimal node-http request double. */
@@ -192,6 +207,18 @@ const cookieOnly = await call({
 check('cookie-authorizes', cookieOnly.status === 200 && settings.maxOutputBytes === 8192, JSON.stringify(cookieOnly.payload));
 const badCookie = await call({ method: 'POST', url: '/ssh-pool/settings', headers: { cookie: 'dsh_ssh_pool_token=deadbeef' }, body: { maxOutputBytes: 1024 } });
 check('bad-cookie-rejected', badCookie.status === 403 && settings.maxOutputBytes === 8192, JSON.stringify(badCookie.payload));
+
+const editCall = await call({ method: 'POST', url: '/ssh-pool/edit-host', headers: authorized, body: { alias: 'web-host', newAlias: 'web-host-new', keyName: 'web-host_new' } });
+check('edit-host', editCall.status === 200 && edited?.alias === 'web-host' && edited?.newAlias === 'web-host-new' && edited?.keyName === 'web-host_new' && editCall.payload.edit.changed === true, JSON.stringify({ editCall, edited }));
+const editUnknown = await call({ method: 'POST', url: '/ssh-pool/edit-host', headers: authorized, body: { alias: 'nope', newAlias: 'x' } });
+check('edit-host-unknown', editUnknown.status === 400, JSON.stringify(editUnknown.payload));
+
+const renameHostCall = await call({ method: 'POST', url: '/ssh-pool/rename-host', headers: authorized, body: { alias: 'web-host', newAlias: 'web-host-new' } });
+check('rename-host', renameHostCall.status === 200 && renamedHost?.alias === 'web-host' && renamedHost?.newAlias === 'web-host-new' && renameHostCall.payload.rename.changed === true, JSON.stringify({ renameHostCall, renamedHost }));
+const renameCall = await call({ method: 'POST', url: '/ssh-pool/rename-key', headers: authorized, body: { alias: 'web-host', keyName: 'web-host_new' } });
+check('rename-key', renameCall.status === 200 && renamed?.alias === 'web-host' && renamed?.keyName === 'web-host_new' && renameCall.payload.rename.changed === true, JSON.stringify({ renameCall, renamed }));
+const renameUnknown = await call({ method: 'POST', url: '/ssh-pool/rename-key', headers: authorized, body: { alias: 'nope', keyName: 'x' } });
+check('rename-key-unknown-host', renameUnknown.status === 400, JSON.stringify(renameUnknown.payload));
 
 const opened = await call({ method: 'POST', url: '/ssh-pool/action', headers: authorized, body: { action: 'open', alias: 'web-host' } });
 check('action-open', opened.status === 200 && calls.includes('ensure:web-host'), JSON.stringify(calls));

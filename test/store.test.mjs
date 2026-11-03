@@ -104,6 +104,13 @@ check('settings-patch', patched.idleTimeoutMs === 120000 && patched.maxOutputByt
 check('settings-deleted-key-ignored', !('maxLogLines' in patched), JSON.stringify(patched));
 check('settings-bad-value-kept', migrated.setSettings({ maxOutputBytes: 10 }).maxOutputBytes === 32768, JSON.stringify(migrated.settings()));
 check('settings-idle-bad-value-kept', migrated.setSettings({ idleTimeoutMs: -1 }).idleTimeoutMs === 120000, JSON.stringify(migrated.settings()));
+
+const movable = new MetadataStore({ filePath: join(dir, 'move.json') });
+movable.setHost('old-host', { hidden: true, remark: 'keep', idleTimeoutMs: 45000 });
+const moved = movable.renameHost('old-host', 'new-host');
+check('host-meta-moved', moved.hidden === true && moved.remark === 'keep' && moved.idleTimeoutMs === 45000, JSON.stringify(moved));
+check('host-meta-old-gone', movable.host('old-host').hidden === false && movable.host('old-host').remark === '', JSON.stringify(movable.host('old-host')));
+check('host-meta-persisted', new MetadataStore({ filePath: join(dir, 'move.json') }).host('new-host').hidden === true, JSON.stringify(new MetadataStore({ filePath: join(dir, 'move.json') }).raw()));
 check('ssh-visible-false-survives-reload', new MetadataStore({ filePath: legacyFile }).settings().sshVisible === false, JSON.stringify(new MetadataStore({ filePath: legacyFile }).settings()));
 
 // ── a corrupt file never blocks loading and is replaced on the next write ───

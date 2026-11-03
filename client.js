@@ -45,6 +45,28 @@ window.__ModuleLoader__.load({
       logAnalysisDesc: '开启后，较大的日志读取/搜索/日志类命令会交给一个没有工具的旁路模型分析，主会话只收到摘要；需要原文时在调用里传 analyze:false。默认关闭。日志会先脱敏，再发送到你配置的默认模型提供商；敏感日志请保持关闭。',
       transferTimeout: '文件传输超时',
       transferTimeoutDesc: '单位：秒。单次 SFTP 上传/下载的默认时限，默认 600 秒（10 分钟）；到点即取消传输，避免链路卡住时一直挂着。',
+      hostColumn: '主机',
+      keyColumn: '密钥',
+      statusColumn: '状态',
+      controlsColumn: '操作',
+      remarkColumn: '备注',
+      renameHost: '重命名 Host',
+      renameHostDesc: '会修改本机 ~/.ssh/config 里的 Host 名称，并备份配置；HostName 和密钥文件不变。',
+      renameHostWarning: '改名后，会话里要用新的 Host 名；旧名字将不再可用，正在运行的连接会在下次使用时重建。',
+      renameHostPlaceholder: '新的 Host 名',
+      renameHostConfirm: '确认重命名',
+      renameKey: '重命名密钥',
+      renameKeyDesc: '会真实重命名本机 key 文件，并更新 ~/.ssh/config 中所有指向它的 IdentityFile。',
+      renameKeyWarning: 'Host 名和主机地址不变；正在运行的连接会在下次使用时按新路径重连。',
+      renameKeyPlaceholder: '新的密钥文件名',
+      renameKeyConfirm: '确认重命名',
+      editDialog: '编辑连接',
+      editDialogDesc: 'Host 名和密钥文件名可以一起改；保存时会备份 ~/.ssh/config，密钥文件会被真实重命名。',
+      editDialogWarning: 'Host 改名会影响会话里使用的名字；密钥改名会真实重命名本机 key 文件。两项在一次提交中完成，任一项失败不会写入。',
+      hostNameLabel: 'Host 名',
+      keyNameLabel: '密钥文件名',
+      save: '保存',
+      cancel: '取消',
       open: '连接',
       closeConnection: '断开',
       connected: '已连接',
@@ -95,6 +117,17 @@ window.__ModuleLoader__.load({
 .ssh-grow{flex:1 1 auto}
 .ssh-content{overflow:auto;padding:26px 52px 36px;display:flex;flex-direction:column;gap:22px;min-height:0}
 .ssh-sec{font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary);letter-spacing:.04em;margin-bottom:10px}
+.ssh-dialog-backdrop{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.55)}
+.ssh-dialog{width:min(420px,100%);border:1px solid var(--dsw-alias-border-l1);border-radius:14px;background:var(--dsw-alias-bg-overlay);box-shadow:0 24px 64px rgba(0,0,0,.45);padding:18px}
+.ssh-dialog-title{font-size:15px;font-weight:600;margin-bottom:8px}
+.ssh-dialog-desc{font-size:12.5px;line-height:18px;color:var(--dsw-alias-label-secondary)}
+.ssh-dialog-host{margin-top:10px;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);font-size:12px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ssh-dialog-field{margin-top:12px;font-size:11.5px;color:var(--dsw-alias-label-secondary)}
+.ssh-dialog-input{width:100%;height:32px;margin-top:12px;padding:0 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px}
+.ssh-dialog-input:focus{outline:none;border-color:var(--dsw-alias-border-l2)}
+.ssh-dialog-warning{margin-top:10px;font-size:11.5px;line-height:17px;color:var(--dsw-alias-label-secondary)}
+.ssh-dialog-error{margin-top:10px;font-size:12px;line-height:17px;color:var(--dsw-alias-state-error-primary)}
+.ssh-dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .ssh-note{font-size:12px;color:var(--dsw-alias-label-secondary);margin:-4px 0 10px}
 .ssh-table{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);overflow:hidden}
 /* One connection per row: identity, state and key first, then the controls, and
@@ -103,11 +136,25 @@ window.__ModuleLoader__.load({
 .ssh-row{display:flex;flex-wrap:wrap;align-items:center;gap:9px 16px;padding:11px 16px}
 .ssh-row + .ssh-row{border-top:1px solid var(--dsw-alias-border-l1)}
 .ssh-row:hover{background:var(--dsw-alias-bg-layer-2)}
-.ssh-id{display:flex;align-items:center;gap:8px;flex:0 0 250px;min-width:0}
-.ssh-state{flex:0 0 104px;font-size:12.5px}
-.ssh-key{flex:0 0 88px;font-size:12px}
+.ssh-keycell{display:flex;flex-direction:column;align-items:flex-start;gap:2px;flex:0 0 150px;min-width:0}
+.ssh-filecell{display:flex;flex-direction:column;align-items:flex-start;gap:2px;flex:0 0 170px;min-width:0}
+.ssh-keyname{display:block;width:100%;height:26px;padding:0 8px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;text-align:left;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ssh-keyname:hover{border-color:var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}
+.ssh-keyname:focus-visible{outline:none;border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base)}
+.ssh-keyname.is-disabled{cursor:default;color:var(--dsw-alias-label-secondary)}
+.ssh-keyname.is-disabled:hover{border-color:transparent;background:transparent}
+.ssh-keyfile{display:block;width:100%;padding:0 8px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;text-align:left;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ssh-keyfile:hover{border-color:var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
+.ssh-keyfile:focus-visible{outline:none;border-color:var(--dsw-alias-border-l2)}
+.ssh-keyfile.is-disabled{cursor:default}
+.ssh-keyfile.is-disabled:hover{border-color:transparent;background:transparent;color:var(--dsw-alias-label-secondary)}
+.ssh-state{display:flex;flex-direction:column;gap:2px;flex:0 0 128px;min-width:0;font-size:12.5px}
+.ssh-state-main{display:flex;align-items:center;gap:6px;min-width:0}
+.ssh-meta{font-size:11px}
 .ssh-remark{width:auto;flex:1 1 220px;min-width:160px;max-width:none}
 .ssh-controls{display:flex;align-items:center;gap:12px;flex:0 0 auto;margin-right:6px}
+.ssh-th{display:flex;flex-wrap:wrap;align-items:center;gap:9px 16px;padding:8px 16px;border-bottom:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-size:11.5px}
+.ssh-th .ssh-keycell,.ssh-th .ssh-filecell,.ssh-th .ssh-state{color:var(--dsw-alias-label-secondary)}
 .ssh-mini{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dsw-alias-label-secondary);white-space:nowrap}
 /* One neutral switch with the two states spelled out on either side: the knob
    shows which side is active and the fixed labels keep the row width stable. */
@@ -118,8 +165,10 @@ window.__ModuleLoader__.load({
 .ssh-sec-row{flex-wrap:wrap;row-gap:8px}
 /* Narrow panel: the control cluster takes its own line under the identity. */
 @container (max-width: 900px){
-  .ssh-id{flex:1 1 100%}
-  .ssh-state{flex:0 0 96px}
+  .ssh-th{display:none}
+  .ssh-keycell{flex:1 1 100%}
+  .ssh-filecell{flex:1 1 100%}
+  .ssh-state{flex:0 0 112px}
   .ssh-remark{flex:1 1 130px}
 }
 .ssh-ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -324,6 +373,7 @@ window.__ModuleLoader__.load({
           const message = cause instanceof Error ? cause.message : String(cause);
           if (isWrite) {
             setNotice(message);
+            options.onError?.(message);
             if (retry) {
               // A stale credential is the usual cause: re-read (which also
               // refreshes it) and try the write exactly once more.
@@ -354,34 +404,171 @@ window.__ModuleLoader__.load({
       return { state, error, notice, busy, settings, setSettings, draft, setDraft, call, beginEdit, endEdit };
     }
 
+    /** One dialog edits both the Host alias and the key file name. */
+    function EditDialog({ t, host, call, onClose }) {
+      const hostEditable = host.source === 'ssh-config';
+      const keyEditable =
+        hostEditable && typeof host.keyName === 'string' && host.keyName.length > 0 && !host.keyName.startsWith('agent:');
+      const [alias, setAlias] = React.useState(host.alias ?? '');
+      const [keyName, setKeyName] = React.useState(keyEditable ? host.keyName : '');
+      const [error, setError] = React.useState(null);
+      const [saving, setSaving] = React.useState(false);
+      const aliasRef = React.useRef(null);
+
+      React.useEffect(() => {
+        aliasRef.current?.focus();
+        aliasRef.current?.select();
+      }, []);
+
+      React.useEffect(() => {
+        const onKey = (event) => {
+          if (event.key === 'Escape' && !saving) onClose();
+        };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+      }, [onClose, saving]);
+
+      const submit = async () => {
+        const nextAlias = String(alias ?? '').trim();
+        const nextKey = keyEditable ? String(keyName ?? '').trim() : host.keyName;
+        if (hostEditable && nextAlias.length === 0) {
+          setError(t('renameHostPlaceholder'));
+          return;
+        }
+        if (keyEditable && nextKey.length === 0) {
+          setError(t('renameKeyPlaceholder'));
+          return;
+        }
+        const aliasChanged = hostEditable && nextAlias !== host.alias;
+        const keyChanged = keyEditable && nextKey !== host.keyName;
+        if (!aliasChanged && !keyChanged) {
+          onClose();
+          return;
+        }
+        setSaving(true);
+        setError(null);
+        // One transaction: the backend renames the key, rewrites Host and
+        // IdentityFile in one config write, and rolls the key back on failure.
+        const body = { alias: host.alias };
+        if (aliasChanged) body.newAlias = nextAlias;
+        if (keyChanged) body.keyName = nextKey;
+        const ok = await call('edit-host', body, { retry: false, onError: setError });
+        setSaving(false);
+        if (ok) onClose();
+      };
+
+      return h(
+        'div',
+        {
+          className: 'ssh-dialog-backdrop',
+          onMouseDown: (event) => {
+            if (event.target === event.currentTarget && !saving) onClose();
+          }
+        },
+        h(
+          'div',
+          { className: 'ssh-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('editDialog') },
+          h('div', { className: 'ssh-dialog-title' }, t('editDialog')),
+          h('div', { className: 'ssh-dialog-desc' }, t('editDialogDesc')),
+          h(
+            'div',
+            { className: 'ssh-dialog-host', title: `${host.alias} ${host.user}@${host.host}:${host.port}` },
+            `${host.user}@${host.host}:${host.port}`
+          ),
+          h('div', { className: 'ssh-dialog-field' }, t('hostNameLabel')),
+          h('input', {
+            ref: aliasRef,
+            className: 'ssh-dialog-input',
+            value: alias,
+            placeholder: t('renameHostPlaceholder'),
+            spellCheck: false,
+            disabled: !hostEditable || saving,
+            onChange: (event) => setAlias(event.target.value),
+            onKeyDown: (event) => {
+              if (event.key === 'Enter' && !saving) {
+                event.preventDefault();
+                void submit();
+              }
+            }
+          }),
+          h('div', { className: 'ssh-dialog-field' }, t('keyNameLabel')),
+          h('input', {
+            className: 'ssh-dialog-input',
+            value: keyEditable ? keyName : host.keyName ?? '—',
+            placeholder: t('renameKeyPlaceholder'),
+            spellCheck: false,
+            disabled: !keyEditable || saving,
+            onChange: (event) => setKeyName(event.target.value),
+            onKeyDown: (event) => {
+              if (event.key === 'Enter' && !saving) {
+                event.preventDefault();
+                void submit();
+              }
+            }
+          }),
+          h('div', { className: 'ssh-dialog-warning' }, t('editDialogWarning')),
+          error === null ? null : h('div', { className: 'ssh-dialog-error' }, error),
+          h(
+            'div',
+            { className: 'ssh-dialog-actions' },
+            h('button', { className: 'ssh-btn', type: 'button', disabled: saving, onClick: onClose }, t('cancel')),
+            h('button', { className: 'ssh-btn ssh-btn-primary', type: 'button', disabled: saving, onClick: () => void submit() }, t('save'))
+          )
+        )
+      );
+    }
+
     /** The panel/window body: the connection table, settings and the policy. */
     function AssistantBody({ t, data }) {
       const { state, error, notice, busy, settings, setSettings, draft, setDraft, call, beginEdit, endEdit } = data;
       const hosts = state?.hosts ?? [];
       const settingsView = settings ?? state?.settings ?? { idleTimeoutMs: 0, maxOutputBytes: 32768, transferTimeoutMs: 600000, sshVisible: true, logAnalysis: false };
       const hiddenCount = hosts.filter((host) => host.hidden === true).length;
+      const [editTarget, setEditTarget] = React.useState(null);
 
       const row = (host) => {
         const remark = draft[`remark:${host.alias}`] ?? host.remark ?? '';
         const idleDraft = draft[`idle:${host.alias}`] ?? seconds(host.idleTimeoutMs);
         const stateLabel = host.retryPaused === true ? t('retryPaused') : host.state === 'ready' ? t('connected') : host.state === 'connecting' ? t('connecting') : host.state === 'down' ? t('down') : t('idle');
-        // Compact in the row, complete in the tooltip. A stateless command leaves
-        // no session behind, so the command count is what shows the host was used.
-        const stats = [
-          stateLabel,
+        const stateTone = statusColor(host.retryPaused === true ? 'paused' : host.state);
+        const meta = [
           host.sessions.length > 0 ? `${host.sessions.length} ${t('sessionsUnit')}` : null,
           (host.commands ?? 0) > 0 ? `${host.commands} ${t('commandsUnit')}` : null
         ].filter(Boolean).join(' · ');
+        const title = `${host.alias} · ${host.user}@${host.host}:${host.port}`;
+        const keyLabel = host.keyName ?? '—';
+        const hostEditable = host.source === 'ssh-config';
+        const keyEditable = hostEditable && typeof host.keyName === 'string' && host.keyName.length > 0 && !host.keyName.startsWith('agent:');
         return h(
           'div',
           { className: 'ssh-row', key: host.alias },
-          h('span', { className: 'ssh-id' },
-            h('span', { className: 'ssh-dot', style: { background: statusColor(host.retryPaused === true ? 'paused' : host.state) }, title: host.lastError ?? stateLabel }),
-            h('span', { className: 'ssh-name ssh-ell', title: host.alias }, host.alias),
-            h('span', { className: 'ssh-muted ssh-ell', title: `${host.user}@${host.host}:${host.port}` }, `${host.user}@${host.host}:${host.port}`)
+          h('span', { className: 'ssh-keycell' },
+            hostEditable
+              ? h('button', {
+                  className: 'ssh-keyname',
+                  type: 'button',
+                  title: `${title} — ${t('editDialog')}`,
+                  onClick: () => setEditTarget(host)
+                }, host.alias)
+              : h('span', { className: 'ssh-keyname is-disabled', title }, host.alias)
           ),
-          h('span', { className: 'ssh-state ssh-muted ssh-ell', title: host.lastError ?? stats }, stats),
-          h('span', { className: 'ssh-key ssh-muted ssh-ell', title: host.keyName ?? 'agent' }, host.keyName ?? 'agent'),
+          h('span', { className: 'ssh-filecell' },
+            keyEditable
+              ? h('button', {
+                  className: 'ssh-keyfile',
+                  type: 'button',
+                  title: `${t('editDialog')} — ${keyLabel}`,
+                  onClick: () => setEditTarget(host)
+                }, keyLabel)
+              : h('span', { className: 'ssh-keyfile is-disabled', title: keyLabel }, keyLabel)
+          ),
+          h('span', { className: 'ssh-state', title: host.lastError ?? [stateLabel, meta].filter(Boolean).join(' · ') },
+            h('span', { className: 'ssh-state-main' },
+              h('span', { className: 'ssh-dot', style: { background: stateTone } }),
+              h('span', { className: 'ssh-status', style: { color: stateTone } }, stateLabel)
+            ),
+            meta.length > 0 ? h('span', { className: 'ssh-meta ssh-muted ssh-ell' }, meta) : null
+          ),
           h('span', { className: 'ssh-controls' },
             h('span', { className: 'ssh-hidden-toggle', title: t('hiddenHint') },
               h('span', { className: `ssh-hidden-label${host.hidden === true ? '' : ' is-on'}` }, t('visible')),
@@ -486,7 +673,16 @@ window.__ModuleLoader__.load({
           h('div', { className: 'ssh-note' }, t('connectionsHint')),
           hosts.length === 0
             ? h('div', { className: 'ssh-note' }, t('noHosts'))
-            : h('div', { className: 'ssh-table' }, hosts.map(row))
+            : h('div', { className: 'ssh-table' },
+                h('div', { className: 'ssh-th' },
+                  h('span', { className: 'ssh-keycell' }, t('hostColumn')),
+                  h('span', { className: 'ssh-filecell' }, t('keyColumn')),
+                  h('span', { className: 'ssh-state' }, t('statusColumn')),
+                  h('span', { className: 'ssh-controls' }, t('controlsColumn')),
+                  h('span', { className: 'ssh-remark' }, t('remarkColumn'))
+                ),
+                hosts.map(row)
+              )
         ),
 
         h(
@@ -590,6 +786,10 @@ window.__ModuleLoader__.load({
             )
           )
         ),
+
+        editTarget !== null
+          ? h(EditDialog, { t, host: editTarget, call, onClose: () => setEditTarget(null) })
+          : null,
 
         h(
           'div',
