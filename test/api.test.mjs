@@ -64,11 +64,16 @@ const store = {
 };
 
 
+const seenLimits = [];
 const api = createAssistantApi({
   pool,
   store,
   config: { hostKeyPolicy: 'warn' },
   logger: undefined,
+  diagnostics: (options) => {
+    seenLimits.push(options);
+    return { counters: { toolCalls: 0 }, events: [] };
+  },
   onSettingsChanged: () => settingsNotices.push(Date.now()),
   refreshHosts: () => { hostRefreshes += 1; },
   renameKey: async ({ alias, keyName }) => {
@@ -136,6 +141,15 @@ check('token-injected', /__DSH_SSH_ASSISTANT__=\{"token":"[0-9a-f]{48}"\}/.test(
 const state = await call({});
 check('get-state', state.status === 200 && state.payload.ok === true && state.payload.state.hosts.length === 2, JSON.stringify(state.payload).slice(0, 160));
 check('state-refreshes-hosts', hostRefreshes >= 1, String(hostRefreshes));
+check('state-default-limits', seenLimits[0] !== undefined && Object.keys(seenLimits[0]).length === 0, JSON.stringify(seenLimits[0]));
+await call({ url: '/ssh-pool/state?events=2' });
+check('state-events-param', seenLimits.at(-1)?.events === 2, JSON.stringify(seenLimits.at(-1)));
+await call({ url: '/ssh-pool/state?events=0' });
+check('state-events-zero', seenLimits.at(-1)?.events === 0, JSON.stringify(seenLimits.at(-1)));
+await call({ url: '/ssh-pool/state?events=9999' });
+check('state-events-forwarded', seenLimits.at(-1)?.events === 9999, 'the route validates and forwards; the buffer clamps to its size');
+await call({ url: '/ssh-pool/state?events=abc' });
+check('state-events-invalid', seenLimits.at(-1) !== undefined && Object.keys(seenLimits.at(-1)).length === 0, JSON.stringify(seenLimits.at(-1)));
 check('state-has-no-key-path', !JSON.stringify(state.payload).includes('C:\\\\') && state.payload.state.hosts[0].keyName === 'web-host_rsa', 'only the key file name may cross the API');
 check('state-has-no-policy', state.payload.state.hosts.every((host) => host.policy === undefined), JSON.stringify(state.payload.state.hosts));
 check('state-has-no-activity-trail', state.payload.state.activity === undefined, JSON.stringify(state.payload.state.activity));

@@ -1,12 +1,12 @@
 /** In-memory diagnostics: bounded, structured, and free of command/output text. */
-import { commandKind, createDiagnostics } from '../lib/diagnostics.js';
+import { DEFAULT_EVENT_LIMIT, MAX_EVENTS, commandKind, createDiagnostics } from '../lib/diagnostics.js';
 
 let pass = 0;
 const failures = [];
 const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: ${detail}`));
 
 const diagnostics = createDiagnostics();
-for (let index = 0; index < 55; index += 1) {
+for (let index = 0; index < 305; index += 1) {
   diagnostics.record({
     tool: 'ssh_run',
     host: 'host-a',
@@ -19,10 +19,15 @@ for (let index = 0; index < 55; index += 1) {
     commandKind: index === 0 ? 'du' : null
   });
 }
-const snapshot = diagnostics.snapshot();
-check('bounded-buffer', snapshot.events.length === 50, String(snapshot.events.length));
-check('oldest-dropped', snapshot.events[0].durationMs === 5 && snapshot.events.at(-1).durationMs === 54, JSON.stringify({ first: snapshot.events[0], last: snapshot.events.at(-1) }));
-check('counters', snapshot.counters.toolCalls === 55 && snapshot.counters.failures === 0 && snapshot.counters.analyses.success === 1 && snapshot.counters.analyses.empty === 1, JSON.stringify(snapshot.counters));
+const snapshot = diagnostics.snapshot({ events: MAX_EVENTS });
+check('bounded-buffer', snapshot.events.length === 300, String(snapshot.events.length));
+check('oldest-dropped', snapshot.events[0].durationMs === 5 && snapshot.events.at(-1).durationMs === 304, JSON.stringify({ first: snapshot.events[0].durationMs, last: snapshot.events.at(-1).durationMs }));
+check('counters', snapshot.counters.toolCalls === 305 && snapshot.counters.failures === 0 && snapshot.counters.analyses.success === 1 && snapshot.counters.analyses.empty === 1, JSON.stringify(snapshot.counters));
+check('default-limit', diagnostics.snapshot().events.length === DEFAULT_EVENT_LIMIT, String(diagnostics.snapshot().events.length));
+check('default-is-newest', diagnostics.snapshot().events.at(-1).durationMs === 304, JSON.stringify(diagnostics.snapshot().events.at(-1)));
+check('limit-zero', diagnostics.snapshot({ events: 0 }).events.length === 0 && diagnostics.snapshot({ events: 0 }).counters.toolCalls === 305, JSON.stringify(diagnostics.snapshot({ events: 0 }).counters));
+check('limit-small', diagnostics.snapshot({ events: 3 }).events.map((event) => event.durationMs).join(',') === '302,303,304', JSON.stringify(diagnostics.snapshot({ events: 3 }).events.map((event) => event.durationMs)));
+check('limit-invalid', diagnostics.snapshot({ events: -5 }).events.length === DEFAULT_EVENT_LIMIT && diagnostics.snapshot({ events: 'abc' }).events.length === DEFAULT_EVENT_LIMIT, 'invalid limits fall back to the default');
 check('slow-marked', snapshot.events.every((event) => event.slow === false), JSON.stringify(snapshot.events.slice(0, 2)));
 
 const secrets = createDiagnostics();

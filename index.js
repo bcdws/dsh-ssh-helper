@@ -259,7 +259,7 @@ export function apply(ctx, config = {}) {
           config: normalized,
           logger: ctx.logger,
           analysisStatus: () => analyzer.status(),
-          diagnostics: () => diagnostics.snapshot(),
+          diagnostics: (options) => diagnostics.snapshot(options),
           onSettingsChanged: applyVisibility,
           refreshHosts,
           renameKey,

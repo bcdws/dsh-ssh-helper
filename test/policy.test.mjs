@@ -39,6 +39,14 @@ check('denial-names-every-hit', multiple.action === 'deny' && multiple.matches.l
 check('denial-shape', multiple.rule === 'danger.rm-root' && typeof multiple.title === 'string' && typeof multiple.reason === 'string' && typeof multiple.suggestion === 'string', JSON.stringify(multiple));
 check('host-independent', JSON.stringify(policy.evaluate({ alias: 'a', command: 'rm -rf /etc' })) === JSON.stringify(policy.evaluate({ alias: 'b', command: 'rm -rf /etc' })), 'the guard has no per-host state');
 check('hints-mention-system', /系统关键目录|mkfs|块设备/.test(policy.hints()), policy.hints());
+check('hints-forbid-workaround', /不要换一种等价写法重试/.test(policy.hints()), policy.hints());
+
+// ── connectivity probes: bash's /dev/tcp is a socket, not a disk ────────────
+const tcpProbe = verdict('for p in 22 443; do timeout 6 bash -c "echo > /dev/tcp/203.0.113.9/$p" 2>/dev/null && echo "$p OPEN"; done');
+check('tcp-probe-allowed', tcpProbe.action === 'allow', JSON.stringify(tcpProbe));
+check('udp-probe-allowed', verdict('echo > /dev/udp/203.0.113.9/53').action === 'allow', JSON.stringify(verdict('echo > /dev/udp/203.0.113.9/53')));
+check('probe-does-not-weaken-device', verdict(': > /dev/sda').action === 'deny', JSON.stringify(verdict(': > /dev/sda')));
+check('probe-does-not-weaken-dd', verdict('dd if=/tmp/img of=/dev/nvme0n1p1 bs=1M').action === 'deny', JSON.stringify(verdict('dd if=/tmp/img of=/dev/nvme0n1p1 bs=1M')));
 
 // ── normalization ───────────────────────────────────────────────────────────
 const plain = normalizeSegment('  sudo rm   -rf   "/etc"  ');
@@ -56,6 +64,7 @@ check('write-boot', protectedWritePath('/boot/vmlinuz')?.rule === 'danger.write-
 check('write-proc', protectedWritePath('/proc/sys/kernel/panic')?.rule === 'danger.write-system', JSON.stringify(protectedWritePath('/proc/sys/kernel/panic')));
 check('write-dev-null-allowed', protectedWritePath('/dev/null') === null, JSON.stringify(protectedWritePath('/dev/null')));
 check('write-dev-shm-allowed', protectedWritePath('/dev/shm/x') === null, JSON.stringify(protectedWritePath('/dev/shm/x')));
+check('write-dev-tcp-allowed', protectedWritePath('/dev/tcp/host/22') === null, JSON.stringify(protectedWritePath('/dev/tcp/host/22')));
 check('write-config-allowed', protectedWritePath('/etc/nginx/nginx.conf') === null, JSON.stringify(protectedWritePath('/etc/nginx/nginx.conf')));
 check('write-business-allowed', protectedWritePath('/srv/app/config.yml') === null, JSON.stringify(protectedWritePath('/srv/app/config.yml')));
 check('write-traversal', protectedWritePath('/srv/../../boot/vmlinuz')?.rule === 'danger.write-system', JSON.stringify(protectedWritePath('/srv/../../boot/vmlinuz')));
