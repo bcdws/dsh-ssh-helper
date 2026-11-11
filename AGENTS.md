@@ -17,14 +17,20 @@ DSH 通过 `link:` 指向仓库目录，所以运行的就是这个目录里的�
 
 - 不修改 `~/.ssh/config`，不添加主机。
 - 不连接服务器，不执行远程命令。
-- 已经装了插件的 DSH agent，不要再在 Magpie 里给它开 MCP 版本，否则工具会重复。
+- 已经装了插件的 DSH agent，不要再给它接 MCP 版本，否则工具会重复。
 - 只报告安装结果和 profile 路径。
 
 ## MCP 版本
 
-由 Magpie 等客户端通过 `npx -y github:bcdws/dsh-ssh-helper` 安装（见 README），仓库里不需要做额外的事。npx 拉取的是 GitHub 默认分支，所以改动推送后才会到达 MCP 用户。
+这是一个标准的 stdio MCP server，不绑定任何客户端或网关。客户端通过 `npx -y github:bcdws/dsh-ssh-helper#stable` 启动（见 README）。
 
-桌面客户端对**命令型** MCP 服务器的 `initialize` 有很短的预算（Magpie 是 30 秒，见其 `docs/subsystems/library.md` 的 `stdioStep`），超时就显示 “initialize 无响应”。所以这个包安装时必须快、且不能跑生命周期脚本：ssh2 已经预打包进 `vendor/ssh2.cjs`，运行时依赖为 0，npx 只解一个 tarball。不要把 ssh2 放回 `dependencies`。
+发布流程是自动的，不要手动推 `stable`：
+
+- 推送到 `main` → CI 全绿 → `promote` job 把 `stable` 快进到该提交。
+- npx 每次启动都会重新解析分支，所以用户下次启动 server 时就拿到新代码；CI 失败的提交到不了 `stable`。
+- 推 `v*` tag → 生成 release 并附上 tarball。发版时先改 `package.json` 的 `version`。
+
+桌面客户端对**命令型** MCP 服务器的 `initialize` 有很短的预算（有的只有约 30 秒），超时就显示 “initialize 无响应”。所以这个包安装时必须快、且不能跑生命周期脚本：ssh2 已经预打包进 `vendor/ssh2.cjs`，运行时依赖为 0，npx 只解一个 tarball。不要把 ssh2 放回 `dependencies`。
 
 ## 结构与规则
 
@@ -35,7 +41,7 @@ mcp/      bin/              MCP 适配层（stdio）
 vendor/ssh2.cjs          预打包的 ssh2（构建产物，勿手改）
 scripts/build-vendor.mjs 重新生成 vendor/ 的脚本
 scripts/pack-smoke.mjs   打包冒烟：npm pack → 装 tarball → initialize
-.github/workflows/ci.yml 测试、vendor 对比、打包冒烟、tag 发版附件
+.github/workflows/ci.yml 测试、vendor 对比、打包冒烟、main→stable 快进、tag 发版
 ```
 
 - 护栏必须留在工具内部：`ssh_run` 里的 `assertCommandAllowed`，以及文件写入用的 `assertWritePathAllowed`。适配层可以再加拦截，但不能替代这两处。

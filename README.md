@@ -1,6 +1,6 @@
 # dsh-ssh-helper
 
-给 AI 运维个人服务器用的 SSH 连接池、8 个工具和一道防止误删系统的护栏。同一套核心有两种接入方式：**DSH 插件**，或 **MCP server**（通过 Magpie 等网关给任意 agent 使用）。
+给 AI 运维个人服务器用的 SSH 连接池、8 个工具和一道防止误删系统的护栏。同一套核心有两种接入方式：**DSH 插件**，或标准的 **MCP server**（stdio，任何 MCP 客户端或网关都能接入）。
 
 - **连接复用**：每台主机一个常驻 SSH 连接，断线自动重连，命令不再重复握手。
 - **会话隔离**：`cd` 和环境变量按调用方隔离，连接共享。
@@ -28,16 +28,16 @@ dsh plugin --profile <profile> add "link:$PWD"
 
 用 `dsh plugin --profile <profile> list` 确认已加载；`ssh_hosts` 的结果里出现 `[policy]` 也说明已加载。
 
-### 方式二：MCP（Magpie 等任意 MCP 客户端）
+### 方式二：MCP server
 
-不需要 clone。在 Magpie 的 MCP 库里添加服务时粘贴下面这段 JSON，然后勾选需要的 agent；Windows 还是 WSL 由 Magpie 自己处理。Claude Code、Codex、Cursor 等客户端也用同一段配置。
+不需要 clone。把下面这段配置加到你的 MCP 客户端或网关里（Claude Code、Codex、Cursor 等都用同一段）：
 
 ```json
 {
   "mcpServers": {
     "ssh": {
       "command": "npx",
-      "args": ["-y", "github:bcdws/dsh-ssh-helper"]
+      "args": ["-y", "github:bcdws/dsh-ssh-helper#stable"]
     }
   }
 }
@@ -45,12 +45,14 @@ dsh plugin --profile <profile> add "link:$PWD"
 
 需要时可以在 `args` 末尾追加参数：`--config <file.json>`（与插件 config 同名的键，如 `hosts`、`exclude`）、`--ssh-config <path>`、`--state <path>`、`--quiet`。
 
-这个包**运行时零依赖**（ssh2 已预打包进 `vendor/`），所以 npx 只解一个 tarball、不跑任何安装脚本。这对桌面客户端很关键：它们给命令型 MCP 服务器的 `initialize` 只留很短的预算（Magpie 是 30 秒），装得慢或要编译就会被当成“initialize 无响应”。
+**更新**：`stable` 分支只在 CI 全部通过后才前进；npx 每次启动都会重新解析它，所以新版本在下次启动 server 时自动生效，不用重装。想固定版本就把 `#stable` 换成 tag（如 `#v0.6.0`），想跟最新提交就去掉 `#stable`。
+
+这个包运行时零依赖（ssh2 已预打包进 `vendor/`），npx 只解一个 tarball、不跑安装脚本，启动足够快，不会超出客户端等待 `initialize` 的时间。
 
 两种方式互不影响：
 
 - 各有各的连接池；MCP 默认不读 DSH 面板状态，需要跟随时加 `--state ~/.dsh/ssh-pool/state.json`（只读）。
-- 已经装了插件的 DSH agent 不要再勾选这个 MCP，否则工具会重复。
+- 已经装了插件的 DSH agent 不要再接这个 MCP，否则工具会重复。
 
 ## 工具
 
@@ -77,6 +79,8 @@ dsh plugin --profile <profile> add "link:$PWD"
 node test/run.mjs --offline   # 离线测试，不需要服务器
 node test/run.mjs             # 加上可选的 live 测试
 ```
+
+推送到 `main` 后 CI 跑测试和打包冒烟，全绿则自动把 `stable` 快进到该提交；推 `v*` tag 会生成带 tarball 的 release。
 
 ## License
 

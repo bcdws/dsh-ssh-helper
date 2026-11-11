@@ -274,7 +274,7 @@ function makeSession(tools, capabilities = {}) {
 
   // Packaging: `npx -y github:…` must install with zero dependencies and no
   // lifecycle scripts. Desktop MCP clients stop waiting for `initialize` after
-  // a few tens of seconds (magpie: 30 s for a command server), and ssh2's
+  // a few tens of seconds (about 30 s for a command server), and ssh2's
   // `node-gyp` postinstall either blows that budget or fails outright when the
   // client spawns npx with a PATH that has no `node`. ssh2 therefore ships
   // pre-bundled in vendor/ — putting it back in `dependencies` brings both

@@ -5,7 +5,15 @@ name: ci
 #  - the committed vendor/ssh2.cjs is exactly what `npm run build:vendor`
 #    produces, so a bumped ssh2 can never ship a stale bundle;
 #  - the packed tarball really installs with zero dependencies and answers
-#    `initialize` fast enough for desktop MCP clients (magpie: 30 s).
+#    `initialize` fast enough for desktop MCP clients (about 30 s).
+#
+# What it automates:
+#  - main → stable: once every job is green on a push to main, the `stable`
+#    branch is fast-forwarded to that commit. MCP clients launch
+#    `npx -y github:bcdws/dsh-ssh-helper#stable`, and npx re-resolves the branch
+#    on every start, so a verified push reaches them the next time the server
+#    starts — and a red push never does.
+#  - v* tag → a GitHub release with the tarball attached.
 
 on:
   push:
@@ -79,6 +87,21 @@ jobs:
           name: dsh-ssh-helper-tarball
           path: '*.tgz'
           if-no-files-found: error
+
+  promote:
+    name: fast-forward stable
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # No --force: if a newer run already promoted a later commit, this push
+      # is rejected and stable keeps the newer one.
+      - run: git push origin "$GITHUB_SHA:refs/heads/stable"
 
   release:
     name: attach the tarball to the release

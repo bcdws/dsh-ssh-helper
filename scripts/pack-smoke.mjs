@@ -7,7 +7,7 @@
  *
  * This is the guarantee `npx -y github:bcdws/dsh-ssh-helper` relies on: one
  * package, no dependencies, no lifecycle scripts, an `initialize` answer well
- * inside the short budget desktop clients give a command server (magpie: 30 s).
+ * inside the short budget desktop clients give a command server (about 30 s).
  *
  *   node scripts/pack-smoke.mjs
  */

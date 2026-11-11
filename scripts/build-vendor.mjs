@@ -5,8 +5,8 @@
  * Why: `npx -y github:bcdws/dsh-ssh-helper` installs straight from git. A plain
  * `dependencies: { ssh2 }` makes npm fetch 7 packages and run ssh2's
  * `node-gyp rebuild` postinstall, which needs a compiler (or at least `node` on
- * the PATH of npm's script shell — often missing when a desktop app such as
- * magpie launches npx). The MCP client's `initialize` budget is short (magpie:
+ * the PATH of npm's script shell — often missing when a desktop app launches
+ * npx). An MCP client's `initialize` budget is short (some allow only about
  * 30 s for a command server), so a slow or failing install reads as
  * "initialize 无响应".
  *
