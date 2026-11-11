@@ -2,6 +2,12 @@
  * Host plugin: a persistent SSH connection pool, its model-facing tools, the
  * command policy, and the SSH assistant's Host API.
  *
+ * This file is the DSH adapter only. Everything under `lib/` is host-neutral:
+ * the tools take a neutral call context (`lib/call-context.js`) and enforce the
+ * command policy themselves, so another host can mount them without this file.
+ * What stays here is DSH-specific: tool registration, the plan-mode and
+ * local-bash guards, the side-analysis LLM route, and the web panel.
+ *
  * Hosts are resolved once at activation (OpenSSH config plus the plugin's own
  * `hosts`) and held in `SshPool`, so every tool call reuses an existing
  * connection instead of paying a fresh handshake. Persistent shell state is
@@ -12,10 +18,11 @@
  */
 import { buildHostTable, normalizeConfig } from './lib/config.js';
 import { MetadataStore } from './lib/store.js';
-import { createPolicy } from './lib/policy.js';
+import { createPolicy, formatDenial } from './lib/policy.js';
 import { createAssistantApi } from './lib/api.js';
 import { SshPool } from './lib/pool.js';
 import { createTools } from './lib/tools.js';
+import { fromDshExecution } from './lib/call-context.js';
 import { commandKind, createDiagnostics } from './lib/diagnostics.js';
 import { createAnalyzer } from './lib/analysis.js';
 import { isDeleteCommand, isLocalSshDelete, isPlanActive } from './lib/plan-guard.js';
@@ -26,21 +33,15 @@ import { editHostIdentity } from './lib/edit-host.js';
 export const name = 'ssh-pool';
 export const inject = ['tools'];
 
-/** The model-facing denial for a policy verdict. */
-export function denyMessage(verdict, alias = '') {
-  // Name EVERY rule that matched, not just the first one: reporting one at a
-  // time is what made the agent guess its way through three rules in a row.
-  const others = (Array.isArray(verdict.matches) ? verdict.matches : []).filter((match) => match.rule !== verdict.rule);
-  return [
-    `[ssh-pool policy] 命令被拒绝（规则 ${verdict.rule}）: ${verdict.title}`,
-    `主机 ${alias || '?'}`,
-    others.length === 0 ? '' : `同时命中: ${others.map((match) => `${match.rule}（${match.title}）`).join('、')}`,
-    `原因: ${verdict.reason}`,
-    `建议: ${verdict.suggestion}`,
-    '规则全表与合规写法: 调用 ssh_hosts 查看 [policy] 提示，或查看插件 README'
-  ]
-    .filter((line) => line.length > 0)
-    .join('\n');
+/** The model-facing denial for a policy verdict (kept for existing importers). */
+export const denyMessage = formatDenial;
+
+/**
+ * Adapt a neutral tool to the DSH registry: DSH hands `execute` its own
+ * execution object, the tools expect `{ callerId, signal }`.
+ */
+export function toDshTool(tool) {
+  return { ...tool, execute: (args, execution) => tool.execute(args, fromDshExecution(execution)) };
 }
 
 /** Denial for a delete attempted while plan mode is active or pending. */
@@ -160,7 +161,7 @@ export function apply(ctx, config = {}) {
   );
 
   ctx.effect(() => {
-    const tools = createTools(pool, normalized, { policy, analyzer, diagnostics });
+    const tools = createTools(pool, normalized, { policy, analyzer, diagnostics }).map(toDshTool);
 
     // The SSH visibility switch: when off, the tools are unregistered, so no
     // session can see or call them (a context-global `tools.restrict` is
@@ -188,8 +189,10 @@ export function apply(ctx, config = {}) {
     };
     applyVisibility();
 
-    // The command policy runs as a guard: monotonic, synchronous, and applied
-    // before any transport work, so no argument shape can slip past it.
+    // The command policy also runs as a DSH guard: monotonic, synchronous, and
+    // applied before the tool is even dispatched, so a refusal reads as a guard
+    // denial in DSH. `ssh_run` re-checks the same policy inside `execute`; that
+    // copy is what protects any non-DSH host mounting the tools.
     //
     // Plan mode is collaboration, not enforcement (DSH keeps every tool
     // callable), so this guard adds the two SSH-specific limits:

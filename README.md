@@ -122,6 +122,15 @@ dsh plugin --profile <profile> list
 
 日志旁路分析默认关闭；开启后日志会先脱敏，再发送到你配置的默认模型提供商。敏感日志请保持关闭。
 
+## 接入其它宿主（开发者）
+
+`lib/` 不依赖 DSH，`index.js` 只是 DSH 适配层。其它宿主（如 MCP server）挂载工具时可依赖：
+
+- `createTools(pool, config, { analyzer?, diagnostics? })` 返回 8 个普通工具对象；`execute(args, call)` 只读中立上下文 `{ callerId, signal }`（`lib/call-context.js`）。`callerId` 决定 shell session 归属，不同调用方互不串状态。
+- 致命命令策略在工具内部执行，不传 `policy` 也会生效；拒绝时抛出 `PolicyDeniedError`（`code: 'POLICY_DENY'`，带 `rule` / `title` / `reason` / `suggestion` / `host`）。
+- 日志旁路分析可换后端：`createSideAnalyzer({ backend: { status, complete } })`；没有模型时用 `unavailableAnalyzer()`。
+- 计划模式、本地 bash 拦截、面板 HTTP API 属于 DSH 专有，留在 `index.js`。
+
 ## 开发与测试
 
 ```bash
