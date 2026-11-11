@@ -206,6 +206,7 @@ export function createAssistantApi({ pool, store, config, logger, analysisStatus
       if (path === 'meta') {
         const alias = typeof body.alias === 'string' ? body.alias : '';
         if (!pool.has(alias)) throw new Error(`unknown host "${alias}"`);
+        const wasHidden = store.host(alias)?.hidden === true;
         store.setHost(alias, {
           ...(body.remark !== undefined ? { remark: body.remark } : {}),
           ...(body.hidden !== undefined ? { hidden: body.hidden } : {}),
@@ -213,7 +214,35 @@ export function createAssistantApi({ pool, store, config, logger, analysisStatus
           ...(body.level !== undefined ? { level: body.level } : {}),
           ...(body.idleTimeoutMs !== undefined ? { idleTimeoutMs: body.idleTimeoutMs } : {})
         });
-        send(res, 200, { ok: true, state: buildState() });
+        // Hiding a host is the human saying "stop using this one": its live
+        // transport (and any scheduled reconnect) goes with the switch, so a
+        // hidden row can never keep showing 已连接. Only a switch that actually
+        // turns hiding on disconnects — a remark edit or unhiding leaves the
+        // connection alone. This runs against the panel's own pool; the MCP
+        // adapter keeps a separate pool and only reads `state.json`, so its
+        // connections are untouched.
+        const nowHidden = store.host(alias)?.hidden === true;
+        const disconnected = wasHidden === false && nowHidden === true;
+        if (disconnected) {
+          const connection = pool.connection(alias);
+          // close() cannot cancel a handshake that is already in flight: ssh2
+          // only hands the client over once it is ready. Remember that state
+          // and drop the transport when it lands, so hiding during "连接中"
+          // cannot leave a connected hidden host. `ensure()` here returns the
+          // pending handshake, never a new connect.
+          const connecting = connection.state === 'connecting';
+          connection.close('hidden in the SSH assistant');
+          if (connecting) {
+            void connection.ensure().then(
+              () => {
+                if (store.host(alias)?.hidden === true) connection.close('hidden in the SSH assistant');
+              },
+              () => undefined
+            );
+          }
+          logger?.info?.(`ssh-pool: ${alias} hidden; closed its live connection`);
+        }
+        send(res, 200, { ok: true, state: buildState(), ...(disconnected ? { disconnected: true } : {}) });
         return;
       }
 

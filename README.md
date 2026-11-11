@@ -52,6 +52,7 @@ dsh plugin --profile <profile> add "link:$PWD"
 两种方式互不影响：
 
 - 各有各的连接池；MCP 默认不读 DSH 面板状态，需要跟随时加 `--state ~/.dsh/ssh-pool/state.json`（只读）。
+- 面板里把某台主机设为「隐藏」时，DSH 这一侧会立即断开它（并取消待重连），MCP 进程有自己的连接池，不受影响。
 - 已经装了插件的 DSH agent 不要再接这个 MCP，否则工具会重复。
 
 ## 工具

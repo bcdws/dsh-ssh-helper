@@ -11,6 +11,7 @@ const hosts = new Map([
   ['web-host', { alias: 'web-host', hidden: false, remark: '', idleTimeoutMs: null }],
   ['prod-1', { alias: 'prod-1', hidden: true, remark: '', idleTimeoutMs: null }]
 ]);
+const connectionStates = new Map();
 const pool = {
   has: (alias) => hosts.has(alias),
   status: () =>
@@ -35,10 +36,16 @@ const pool = {
       effectiveIdleTimeoutMs: 0
     })),
   connection: (alias) => ({
+    get state() {
+      return connectionStates.get(alias) ?? 'idle';
+    },
     ensure: async () => {
       calls.push(`ensure:${alias}`);
     },
-    close: (reason) => calls.push(`close:${alias}:${reason}`)
+    close: (reason) => {
+      calls.push(`close:${alias}:${reason}`);
+      connectionStates.set(alias, 'idle');
+    }
   }),
   closeAll: () => calls.push('closeAll')
 };
@@ -178,6 +185,25 @@ const meta = await call({ method: 'POST', url: '/ssh-pool/meta', headers: author
 check('post-meta', meta.status === 200 && hosts.get('web-host').remark === '生产 Web 主库' && hosts.get('web-host').hidden === true, JSON.stringify(calls.slice(-1)));
 check('meta-does-not-forward-caps', !('caps' in hosts.get('web-host')), JSON.stringify(hosts.get('web-host')));
 check('meta-returns-state', meta.payload.state.hosts[0].remark === '生产 Web 主库', JSON.stringify(meta.payload.state.hosts[0]));
+
+// Hiding is also a disconnect for the panel's own pool: a hidden row must not
+// keep a live transport. The MCP adapter is a separate process with its own
+// pool and only reads state.json, so this never reaches it.
+const closeCalls = () => calls.filter((entry) => entry.startsWith('close:web-host:')).length;
+check('hide-closes-connection', closeCalls() === 1 && calls.at(-1) === 'close:web-host:hidden in the SSH assistant', JSON.stringify(calls.slice(-2)));
+check('hide-reports-disconnect', meta.payload.disconnected === true, JSON.stringify(meta.payload).slice(0, 200));
+const hiddenNote = await call({ method: 'POST', url: '/ssh-pool/meta', headers: authorized, body: { alias: 'web-host', remark: '隐藏时只改备注' } });
+check('hidden-note-keeps-connection', hiddenNote.status === 200 && closeCalls() === 1 && hiddenNote.payload.disconnected === undefined, JSON.stringify(calls.slice(-2)));
+const unhide = await call({ method: 'POST', url: '/ssh-pool/meta', headers: authorized, body: { alias: 'web-host', hidden: false } });
+check('unhide-does-not-close', unhide.status === 200 && closeCalls() === 1 && hosts.get('web-host').hidden === false, JSON.stringify(calls.slice(-2)));
+// A hide that lands while the handshake is still running: close() can only end
+// a ready client, so the panel closes the transport that lands afterwards.
+// `ensure()` on the same entry returns that in-flight handshake, not a new
+// connect, so a hide never starts a connection of its own.
+connectionStates.set('web-host', 'connecting');
+const hideDuringConnect = await call({ method: 'POST', url: '/ssh-pool/meta', headers: authorized, body: { alias: 'web-host', hidden: true } });
+await new Promise((resolve) => setImmediate(resolve));
+check('hide-during-connect-closes-again', hideDuringConnect.status === 200 && closeCalls() === 3 && connectionStates.get('web-host') === 'idle', JSON.stringify(calls.slice(-4)));
 
 // ── POST /settings: the retained knobs only ─────────────────────────────────
 const settingsCall = await call({ method: 'POST', url: '/ssh-pool/settings', headers: authorized, body: { idleTimeoutMs: 30000, maxOutputBytes: 32768 } });
