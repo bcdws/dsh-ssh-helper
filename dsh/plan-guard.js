@@ -10,7 +10,7 @@
  * The match is a seatbelt over shell text, not a sandbox: a command hidden in a
  * script or built from variables is outside its view.
  *
- * @module dsh-ssh-helper/plan-guard
+ * @module dsh-ssh-helper/dsh/plan-guard
  */
 
 /**

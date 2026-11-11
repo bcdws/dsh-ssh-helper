@@ -2,11 +2,10 @@
  * Host plugin: a persistent SSH connection pool, its model-facing tools, the
  * command policy, and the SSH assistant's Host API.
  *
- * This file is the DSH adapter only. Everything under `lib/` is host-neutral:
- * the tools take a neutral call context (`lib/call-context.js`) and enforce the
- * command policy themselves, so another host can mount them without this file.
- * What stays here is DSH-specific: tool registration, the plan-mode and
- * local-bash guards, the side-analysis LLM route, and the web panel.
+ * Layout: `lib/` is the shared, host-neutral core (pool, policy, tools). This
+ * file plus `dsh/` and `client.js` is the DSH adapter: tool registration, the
+ * plan-mode and local-bash guards, the side-analysis LLM route and the web
+ * panel. `mcp/` plus `bin/` is the other adapter, a stdio MCP server.
  *
  * Hosts are resolved once at activation (OpenSSH config plus the plugin's own
  * `hosts`) and held in `SshPool`, so every tool call reuses an existing
@@ -19,16 +18,17 @@
 import { buildHostTable, normalizeConfig } from './lib/config.js';
 import { MetadataStore } from './lib/store.js';
 import { createPolicy, formatDenial } from './lib/policy.js';
-import { createAssistantApi } from './lib/api.js';
+import { createAssistantApi } from './dsh/api.js';
 import { SshPool } from './lib/pool.js';
 import { createTools } from './lib/tools.js';
 import { fromDshExecution } from './lib/call-context.js';
 import { commandKind, createDiagnostics } from './lib/diagnostics.js';
-import { createAnalyzer } from './lib/analysis.js';
-import { isDeleteCommand, isLocalSshDelete, isPlanActive } from './lib/plan-guard.js';
+import { createAnalyzer } from './dsh/llm-backend.js';
+import { isDeleteCommand, isLocalSshDelete, isPlanActive } from './dsh/plan-guard.js';
 import { renameIdentityFile } from './lib/keyfile.js';
 import { renameHostAlias } from './lib/hostalias.js';
 import { editHostIdentity } from './lib/edit-host.js';
+import { createHostRefresher } from './lib/host-refresh.js';
 
 export const name = 'ssh-pool';
 export const inject = ['tools'];
@@ -87,24 +87,8 @@ export function apply(ctx, config = {}) {
   /**
    * Rebuild the host table from OpenSSH config. Called by the panel on every
    * state read so a host/key added locally appears without reloading the plugin.
-   * A missing or unreadable config is treated as "keep what we have": a
-   * transient read failure must never silently remove every host.
    */
-  const refreshHosts = () => {
-    const next = buildHostTable(normalized);
-    const unreadable = next.warnings.some((warning) => warning.startsWith('cannot read') || warning.startsWith('ssh config not found'));
-    if (unreadable && pool.aliases.length > 0) {
-      pool.warnings = [...next.warnings];
-      return { added: [], changed: [], removed: [], skipped: true };
-    }
-    const diff = pool.refreshHosts(next.hosts, next.warnings);
-    if (diff.added.length > 0 || diff.changed.length > 0 || diff.removed.length > 0) {
-      ctx.logger?.info?.(
-        `ssh-pool: host table refreshed (added=${diff.added.length}, changed=${diff.changed.length}, removed=${diff.removed.length})`
-      );
-    }
-    return diff;
-  };
+  const refreshHosts = createHostRefresher({ pool, config: normalized, logger: ctx.logger });
   /**
    * Rename the actual key file and update ~/.ssh/config, then rebuild the host
    * table so the panel and future connections use the new path.

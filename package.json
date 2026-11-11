@@ -2,7 +2,7 @@
   "name": "dsh-ssh-helper",
   "version": "0.6.0",
   "type": "module",
-  "description": "Persistent SSH connection pool, SSH assistant UI, and a single machine-destruction guard for DeepSeek Harness",
+  "description": "Persistent SSH connection pool, SSH assistant UI, and a single machine-destruction guard for DeepSeek Harness; also runs as a stdio MCP server for any agent",
   "license": "MIT",
   "keywords": [
     "dsh-plugin",
@@ -11,7 +11,9 @@
     "ssh",
     "ssh2",
     "sftp",
-    "server-ops"
+    "server-ops",
+    "mcp",
+    "mcp-server"
   ],
   "repository": {
     "type": "git",
@@ -21,16 +23,24 @@
   "bugs": {
     "url": "https://github.com/bcdws/dsh-ssh-helper/issues"
   },
+  "bin": {
+    "dsh-ssh-mcp": "./bin/dsh-ssh-mcp.js"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg"
+    "./icon": "./icon.svg",
+    "./mcp": "./mcp/server.js",
+    "./mcp/runtime": "./mcp/runtime.js"
   },
   "files": [
     "index.js",
     "client.js",
     "lib/**/*.js",
+    "dsh/*.js",
+    "mcp/*.js",
+    "bin/*.js",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
@@ -40,12 +50,14 @@
     "ssh2": "^1.16.0"
   },
   "engines": {
-    "dsh": ">=0.2.1-rc.2 <0.3.0"
+    "dsh": ">=0.2.1-rc.2 <0.3.0",
+    "node": ">=18"
   },
   "scripts": {
     "test": "node test/run.mjs",
     "test:offline": "node test/run.mjs --offline",
-    "test:live": "node test/run.mjs --live"
+    "test:live": "node test/run.mjs --live",
+    "mcp": "node bin/dsh-ssh-mcp.js"
   },
   "dsh": {
     "bundle": {

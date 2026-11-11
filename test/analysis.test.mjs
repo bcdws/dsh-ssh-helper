@@ -2,7 +2,7 @@
  * Optional side analysis: one tool-less LLM call, never a subagent with SSH
  * tools. These checks use a fake LLM and fake connection, so they are offline.
  */
-import { createAnalyzer } from '../lib/analysis.js';
+import { createAnalyzer } from '../dsh/llm-backend.js';
 import { createTools } from '../lib/tools.js';
 
 let pass = 0;

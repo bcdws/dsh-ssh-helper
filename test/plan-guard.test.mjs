@@ -1,5 +1,5 @@
 /** Plan-mode and raw-local-ssh deletion policy. */
-import { isDeleteCommand, isLocalSshDelete, isPlanActive } from '../lib/plan-guard.js';
+import { isDeleteCommand, isLocalSshDelete, isPlanActive } from '../dsh/plan-guard.js';
 
 let pass = 0;
 const failures = [];

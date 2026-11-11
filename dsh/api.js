@@ -12,10 +12,10 @@
  * injection reliably; a page on another origin cannot read the body at all, so
  * the credential stays out of reach of cross-site script.
  *
- * @module dsh-ssh-pool/api
+ * @module dsh-ssh-helper/dsh/api
  */
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { SETTINGS_KEYS } from './store.js';
+import { SETTINGS_KEYS } from '../lib/store.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);

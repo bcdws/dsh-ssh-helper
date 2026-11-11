@@ -1,34 +1,23 @@
 # dsh-ssh-helper
 
-**DSH 插件**：给个人服务器运维用的 SSH 连接池与 AI 工具集。
+给 AI 运维个人服务器用的 SSH 连接池、8 个工具和一道防止误删系统的护栏。同一套核心有两种接入方式：**DSH 插件**，或 **MCP server**（通过 Magpie 等网关给任意 agent 使用）。
 
-> 标签：`dsh-plugin` · `dsh` · `ssh` · `server-ops`
+- **连接复用**：每台主机一个常驻 SSH 连接，断线自动重连，命令不再重复握手。
+- **会话隔离**：`cd` 和环境变量按调用方隔离，连接共享。
+- **安全护栏**：只拦会让整台机器报废的 6 类操作，其余放行。
+- **key-only**：使用 `~/.ssh/config` 里的密钥或 ssh-agent，不支持密码，也不存私钥。
 
-## 解决什么问题
-
-使用 AI 维护服务器时，常见痛点是：
-
-- 每条命令重新握手，慢且打断排查节奏；
-- AI 一次读整段日志，主会话上下文很快被淹没；
-- 让 AI 装软件、改配置时，怕它执行 `rm -rf /etc`、`mkfs`、写块设备这类让机器报废的操作；
-- 不同会话之间 shell 状态互相污染。
-
-这个插件把连接、文件和日志操作收进一个常驻 SSH 池，同时保留**最大日常权限**：只拦会让整台机器报废的命令，不拦业务目录和普通维护。
-
-## 主要能力
-
-- **连接复用**：每台主机一个 SSH 连接，后续命令不再重复握手；断线自动重连。
-- **主机可维护**：面板自动刷新 `~/.ssh/config`，Host 名和密钥名都可在弹窗里改。Host 只改 `Host` 行；密钥会真实重命名（含 `.pub`）并更新引用；一次提交只写一次配置，失败不写入。
-- **异常有界**：握手连续超时后暂停自动重连；SFTP 建链最多等 15 秒；失败会明确报错，不挂住会话。
-- **安全护栏**：只拦 6 类会让整台机器报废的操作；计划模式拒绝删除类 `ssh_run`，本地 `bash` 直连 SSH 的删除也会拦截。
-- **日志旁路分析**：可选开关；大日志交给一个没有工具的旁路模型总结，主会话只收摘要。
-- **会话隔离**：shell 会话按 agent + session 名隔离；连接共享，但 `cd`/环境变量不会串。
-- **面板与诊断**：连接状态、隐藏主机、输出上限、旁路开关；内存里保留最近 300 条脱敏诊断事件，`/ssh-pool/state` 默认返回 100 条，可用 `?events=300` 取全量。
-- **key-only**：使用本机 SSH key / agent，不支持密码登录，不存私钥。
+```
+lib/              共享核心：连接池、策略、工具
+index.js  dsh/    DSH 适配层（插件注册、面板、计划模式拦截）
+mcp/      bin/    MCP 适配层（stdio server）
+```
 
 ## 安装
 
-前置：已安装 DSH、Node.js、Git，并能在 `~/.ssh/config` 中看到目标主机。
+前置：Node.js ≥ 18，`~/.ssh/config` 里已配好主机。
+
+### 方式一：DSH 插件
 
 ```bash
 git clone https://github.com/bcdws/dsh-ssh-helper.git
@@ -37,106 +26,54 @@ npm install
 dsh plugin --profile <profile> add "link:$PWD"
 ```
 
-PowerShell 最后一行改为：
+用 `dsh plugin --profile <profile> list` 确认已加载；`ssh_hosts` 的结果里出现 `[policy]` 也说明已加载。
 
-```powershell
-dsh plugin --profile <profile> add "link:$((Get-Location).Path)"
+### 方式二：MCP（Magpie 等任意 MCP 客户端）
+
+不需要 clone。在 Magpie 的 MCP 库里添加服务时粘贴下面这段 JSON，然后勾选需要的 agent；Windows 还是 WSL 由 Magpie 自己处理。Claude Code、Codex、Cursor 等客户端也用同一段配置。
+
+```json
+{
+  "mcpServers": {
+    "ssh": {
+      "command": "npx",
+      "args": ["-y", "github:bcdws/dsh-ssh-helper"]
+    }
+  }
+}
 ```
 
-如果 `dsh` 不在 PATH，请使用 DSH 自带的 CLI 路径，不要猜。装好后确认：
+需要时可以在 `args` 末尾追加参数：`--config <file.json>`（与插件 config 同名的键，如 `hosts`、`exclude`）、`--ssh-config <path>`、`--state <path>`、`--quiet`。
 
-```bash
-dsh plugin --profile <profile> list
-```
+两种方式互不影响：
 
-`ssh_hosts` 的结果里出现 `[policy]` 说明插件已加载。
+- 各有各的连接池；MCP 默认不读 DSH 面板状态，需要跟随时加 `--state ~/.dsh/ssh-pool/state.json`（只读）。
+- 已经装了插件的 DSH agent 不要再勾选这个 MCP，否则工具会重复。
 
-## 让 AI 自己安装
-
-把下面整段发给 DSH 里的 AI：
-
-```text
-请把 DSH 插件 dsh-ssh-helper 安装到当前 profile。
-仓库：https://github.com/bcdws/dsh-ssh-helper
-
-步骤：
-1. git clone 到一个临时目录；
-2. 在仓库目录执行 npm install；
-3. 执行 dsh plugin --profile <profile> add "link:<仓库绝对路径>"；
-4. 用 dsh plugin --profile <profile> list 验证；
-5. 只报告安装结果和 profile 路径。
-
-约束：
-- 不修改我的 ~/.ssh/config，不添加主机；
-- 不连接任何服务器，不执行远程命令；
-- 如果 dsh 不在 PATH 或 profile 不明确，先问我，不要猜。
-```
-
-## 使用
-
-先在 `~/.ssh/config` 配好主机和 IdentityFile，然后直接用自然语言对 AI 说，不需要点名工具：
-
-```text
-帮我看看有哪些服务器
-查一下 server-a 最近 10 分钟的日志
-检查一下 server-a 的健康状态
-帮我在 server-b 上安装这个本地 deb 包
-```
-
-常用工具：
+## 工具
 
 | 工具 | 用途 |
 |---|---|
 | `ssh_hosts` | 列主机、连接状态、最后错误 |
-| `ssh_run` | 执行命令；支持持久 session |
-| `ssh_read` / `ssh_grep` | 读文件、搜内容 |
-| `ssh_write` / `ssh_edit` | 写新文件 / 精确改现有文件 |
-| `ssh_glob` | 按文件名/路径找文件 |
-| `ssh_transfer` | 上传/下载单个文件 |
-
-主机可以在面板里设为「隐藏」：隐藏后 AI 看不到也连不上，面板仍可管理。
+| `ssh_run` | 执行命令；`session` 保持目录和变量，`background` 后台运行 |
+| `ssh_read` / `ssh_grep` / `ssh_glob` | 读文件、搜内容、找文件 |
+| `ssh_write` / `ssh_edit` | 写新文件 / 精确修改现有文件 |
+| `ssh_transfer` | 上传或下载单个文件 |
 
 ## 安全边界
 
-**这不是沙箱，也不是安全边界。** 护栏只做一件事：挡住那几种“一键就让机器报废”的操作，其余一律放行，把权限留给你。
+**这不是沙箱。** 护栏只拦 6 类致命操作：递归删除系统目录、`mkfs` / 分区、`dd` 写块设备、覆盖设备或系统关键文件、递归改系统目录权限、`cd` 到系统目录后批量删除。业务目录（`/srv`、`/home`、`/opt`、`/var/www`、`/data`）不拦。两种方式都在工具内部执行这道检查。
 
-规则不可能穷尽——GNU `rm` 也只硬编码了 `rm -rf /` 这一条。所以这里不做“扫描所有危险命令”的努力，只保留 6 类最高频的致命形态：
+- 被拒时应说明意图（哪台机器、做什么、预期影响），不要换一种等价写法重试。误报按 bug 处理。
+- 计划模式拦截和本地 bash 拦截只在 DSH 里有。在 MCP 下，审批由客户端负责：工具带有只读 / 可能破坏的注解。
+- 真正可靠的保障在插件之外：远程用非 root 账号加 sudo 白名单，重要数据做快照或异机备份。
+- 日志旁路分析默认关闭。开启后日志先脱敏再发给模型（DSH 用默认模型，MCP 用客户端的 sampling）。
 
-- 递归/通配删除系统目录；
-- `mkfs` / 分区；
-- `dd` 写块设备；
-- 覆盖或截断设备与系统关键文件；
-- 递归改系统目录权限；
-- `cd` 后批量删除系统目录。
-
-业务目录（`/srv`、`/home`、`/opt`、`/var/www`、`/data`）的删除和普通维护不拦。
-
-**误报按 bug 处理。** 比如 `/dev/tcp/<host>/<port>` 是 bash 的 socket 伪路径，不是设备节点，早先被误判成“写块设备”，导致探测被拦、agent 改换写法重试。误报比漏报更糟：它会把人推向绕过。真被拦时，正确做法是说明意图（哪台机器、做什么、预期影响），而不是换一种等价写法。
-
-**真正靠得住的手段在插件之外：**
-
-- 远程用非 root 账号 + `sudo` 命令白名单，让灾难性操作在权限层面就不可达；
-- 重要目录做快照（LVM / btrfs / ZFS），或保留异机备份；
-- 出网限制交给防火墙和安全组，不靠命令文本匹配；
-- DSH 的 sandbox 和 approval 只约束本机进程，管不到远程命令。
-
-日志旁路分析默认关闭；开启后日志会先脱敏，再发送到你配置的默认模型提供商。敏感日志请保持关闭。
-
-## 接入其它宿主（开发者）
-
-`lib/` 不依赖 DSH，`index.js` 只是 DSH 适配层。其它宿主（如 MCP server）挂载工具时可依赖：
-
-- `createTools(pool, config, { analyzer?, diagnostics? })` 返回 8 个普通工具对象；`execute(args, call)` 只读中立上下文 `{ callerId, signal }`（`lib/call-context.js`）。`callerId` 决定 shell session 归属，不同调用方互不串状态。
-- 致命命令策略在工具内部执行，不传 `policy` 也会生效；拒绝时抛出 `PolicyDeniedError`（`code: 'POLICY_DENY'`，带 `rule` / `title` / `reason` / `suggestion` / `host`）。
-- 日志旁路分析可换后端：`createSideAnalyzer({ backend: { status, complete } })`；没有模型时用 `unavailableAnalyzer()`。
-- 计划模式、本地 bash 拦截、面板 HTTP API 属于 DSH 专有，留在 `index.js`。
-
-## 开发与测试
+## 开发
 
 ```bash
-npm install
-node test/run.mjs --offline   # 离线套件，不需要服务器
-node test/run.mjs             # 离线 + 可选 live smoke
+node test/run.mjs --offline   # 离线测试，不需要服务器
+node test/run.mjs             # 加上可选的 live 测试
 ```
 
 ## License
