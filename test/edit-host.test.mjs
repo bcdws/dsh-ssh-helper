@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { editHostIdentity } from '../lib/edit-host.js';
+import { quoteConfigValue } from '../lib/keyfile.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'dsh-edit-host-'));
 const ssh = join(dir, '.ssh');
@@ -34,7 +35,9 @@ const afterBoth = readFileSync(config, 'utf8');
 const newKey = join(ssh, 'alpha2_key');
 check('both-flags', both.changed === true && both.aliasChanged === true && both.keyChanged === true, JSON.stringify(both));
 check('both-files', existsSync(newKey) && existsSync(`${newKey}.pub`) && !existsSync(oldKey) && !existsSync(oldPub), JSON.stringify({ newKey: existsSync(newKey), newPub: existsSync(`${newKey}.pub`) }));
-check('both-config', /Host alpha2\n/.test(afterBoth) && afterBoth.split(newKey).length - 1 === 2 && !afterBoth.includes(`${oldKey}\n`) && !afterBoth.includes(`${oldKey} #`), afterBoth);
+// ssh_config doubles a Windows backslash, so compare against the rendered form.
+const identityLines = afterBoth.split(/\r?\n/).filter((line) => /^\s*IdentityFile/i.test(line));
+check('both-config', /^Host alpha2\b/m.test(afterBoth) && identityLines.length === 2 && identityLines.every((line) => line.includes(quoteConfigValue(newKey))), afterBoth);
 check('both-comment', afterBoth.includes('# shared'), afterBoth);
 
 const onlyHost = editHostIdentity({ configPath: config, oldAlias: 'alpha2', newAlias: 'alpha3', oldKeyPath: newKey, newKeyName: undefined, home: dir });

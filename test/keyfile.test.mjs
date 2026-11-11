@@ -2,7 +2,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, symlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { renameIdentityFile } from '../lib/keyfile.js';
+import { quoteConfigValue, renameIdentityFile } from '../lib/keyfile.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'dsh-keyfile-'));
 const sshDir = join(dir, '.ssh');
@@ -35,7 +35,10 @@ check('returns-facts', result.changed === true && result.references === 2 && res
 check('private-renamed', existsSync(newKey) && !existsSync(oldKey), JSON.stringify({ newKey: existsSync(newKey), oldKey: existsSync(oldKey) }));
 check('public-renamed', existsSync(`${newKey}.pub`) && !existsSync(oldPub), 'public key must follow');
 const updated = readFileSync(config, 'utf8');
-check('both-references-updated', updated.split(newKey).length - 1 === 2 && !updated.includes(`${oldKey}\n`) && !updated.includes(`${oldKey} #`), updated);
+// ssh_config doubles a Windows backslash, so compare against the rendered form.
+const identityLines = updated.split(/\r?\n/).filter((line) => /^\s*IdentityFile/i.test(line));
+// Both lines must point at the new key; a line still on the old one would not.
+check('both-references-updated', identityLines.length === 2 && identityLines.every((line) => line.includes(quoteConfigValue(newKey))), updated);
 check('comment-preserved', updated.includes('# shared key'), updated);
 
 const target = join(sshDir, 'taken');
@@ -50,10 +53,20 @@ try { renameIdentityFile({ configPath: config, identityFile: missing, newName: '
 check('missing-key-refused', /identity file not found/.test(missingError), missingError);
 
 const link = join(sshDir, 'linkkey');
-symlinkSync(newKey, link);
-let linkError = '';
-try { renameIdentityFile({ configPath: config, identityFile: link, newName: 'linkkey2', home: dir }); } catch (error) { linkError = error.message; }
-check('symlink-refused', /symlink/.test(linkError), linkError);
+let linkCreated = true;
+try {
+  symlinkSync(newKey, link);
+} catch (error) {
+  // Windows without Developer Mode or admin rights cannot create symlinks;
+  // there is nothing to test there.
+  if (error.code !== 'EPERM' && error.code !== 'ENOSYS') throw error;
+  linkCreated = false;
+}
+if (linkCreated) {
+  let linkError = '';
+  try { renameIdentityFile({ configPath: config, identityFile: link, newName: 'linkkey2', home: dir }); } catch (error) { linkError = error.message; }
+  check('symlink-refused', /symlink/.test(linkError), linkError);
+}
 
 let unreferencedError = '';
 try { renameIdentityFile({ configPath: config, identityFile: join(sshDir, 'other'), newName: 'other2', home: dir }); } catch (error) { unreferencedError = error.message; }
