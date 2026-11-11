@@ -45,6 +45,8 @@ dsh plugin --profile <profile> add "link:$PWD"
 
 需要时可以在 `args` 末尾追加参数：`--config <file.json>`（与插件 config 同名的键，如 `hosts`、`exclude`）、`--ssh-config <path>`、`--state <path>`、`--quiet`。
 
+这个包**运行时零依赖**（ssh2 已预打包进 `vendor/`），所以 npx 只解一个 tarball、不跑任何安装脚本。这对桌面客户端很关键：它们给命令型 MCP 服务器的 `initialize` 只留很短的预算（Magpie 是 30 秒），装得慢或要编译就会被当成“initialize 无响应”。
+
 两种方式互不影响：
 
 - 各有各的连接池；MCP 默认不读 DSH 面板状态，需要跟随时加 `--state ~/.dsh/ssh-pool/state.json`（只读）。

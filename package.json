@@ -41,12 +41,16 @@
     "dsh/*.js",
     "mcp/*.js",
     "bin/*.js",
+    "vendor/*.cjs",
+    "vendor/*.LICENSE",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
     "LICENSE"
   ],
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
+    "esbuild": "^0.28.2",
     "ssh2": "^1.16.0"
   },
   "engines": {
@@ -57,7 +61,8 @@
     "test": "node test/run.mjs",
     "test:offline": "node test/run.mjs --offline",
     "test:live": "node test/run.mjs --live",
-    "mcp": "node bin/dsh-ssh-mcp.js"
+    "mcp": "node bin/dsh-ssh-mcp.js",
+    "build:vendor": "node scripts/build-vendor.mjs"
   },
   "dsh": {
     "bundle": {

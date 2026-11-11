@@ -7,7 +7,8 @@
  * sampling round trips, serialization of non-concurrency-safe tools.
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -270,6 +271,20 @@ function makeSession(tools, capabilities = {}) {
   const pendingAtClose = session.request('sampling/createMessage', {});
   session.close();
   check('close-rejects-pending', await pendingAtClose.then(() => false, (error) => /closed/.test(error.message)), 'pending request survived close');
+
+  // Packaging: `npx -y github:…` must install with zero dependencies and no
+  // lifecycle scripts. Desktop MCP clients stop waiting for `initialize` after
+  // a few tens of seconds (magpie: 30 s for a command server), and ssh2's
+  // `node-gyp` postinstall either blows that budget or fails outright when the
+  // client spawns npx with a PATH that has no `node`. ssh2 therefore ships
+  // pre-bundled in vendor/ — putting it back in `dependencies` brings both
+  // problems back.
+  const root = join(here, '..');
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  check('packaging-no-runtime-deps', Object.keys(manifest.dependencies ?? {}).length === 0, `dependencies: ${JSON.stringify(manifest.dependencies ?? {})}`);
+  const vendored = createRequire(import.meta.url)(join(root, 'vendor', 'ssh2.cjs'));
+  check('packaging-vendored-ssh2', typeof vendored.Client === 'function' && typeof vendored.utils?.parseKey === 'function', 'vendor/ssh2.cjs must export ssh2 (npm run build:vendor)');
+  check('packaging-vendor-shipped', (manifest.files ?? []).some((entry) => entry.startsWith('vendor/')), 'package.json files must ship vendor/');
 }
 
 rmSync(dir, { recursive: true, force: true });

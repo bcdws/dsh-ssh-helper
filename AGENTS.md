@@ -24,19 +24,25 @@ DSH 通过 `link:` 指向仓库目录，所以运行的就是这个目录里的�
 
 由 Magpie 等客户端通过 `npx -y github:bcdws/dsh-ssh-helper` 安装（见 README），仓库里不需要做额外的事。npx 拉取的是 GitHub 默认分支，所以改动推送后才会到达 MCP 用户。
 
+桌面客户端对**命令型** MCP 服务器的 `initialize` 有很短的预算（Magpie 是 30 秒，见其 `docs/subsystems/library.md` 的 `stdioStep`），超时就显示 “initialize 无响应”。所以这个包安装时必须快、且不能跑生命周期脚本：ssh2 已经预打包进 `vendor/ssh2.cjs`，运行时依赖为 0，npx 只解一个 tarball。不要把 ssh2 放回 `dependencies`。
+
 ## 结构与规则
 
 ```
 lib/                     共享核心：连接池、策略、工具。不能引用 dsh/ 或 mcp/
 index.js  dsh/  client.js   DSH 适配层
 mcp/      bin/              MCP 适配层（stdio）
+vendor/ssh2.cjs          预打包的 ssh2（构建产物，勿手改）
+scripts/build-vendor.mjs 重新生成 vendor/ 的脚本
+scripts/pack-smoke.mjs   打包冒烟：npm pack → 装 tarball → initialize
+.github/workflows/ci.yml 测试、vendor 对比、打包冒烟、tag 发版附件
 ```
 
 - 护栏必须留在工具内部：`ssh_run` 里的 `assertCommandAllowed`，以及文件写入用的 `assertWritePathAllowed`。适配层可以再加拦截，但不能替代这两处。
 - 工具只读取中立的调用上下文 `{ callerId, signal }`（`lib/call-context.js`），由各适配层自己转换。
 - MCP 进程的 stdout 只能输出协议消息，日志一律写 stderr。
 - MCP 只读取 DSH 的 `state.json`（而且只在传了 `--state` 时），从不写入。
-- 运行时依赖只保留 `ssh2`，不要引入 MCP SDK 之类的大依赖。
+- 运行时依赖保持为 0：ssh2 用 `npm run build:vendor` 打包进 `vendor/ssh2.cjs`（它是 devDependency），`lib/pool.js` 通过 `require('../vendor/ssh2.cjs')` 加载。升级 ssh2 后必须重新构建；`test/mcp.test.mjs` 有打包检查，CI 也会重新构建并对比 `vendor/`，不一致就失败。不要引入 MCP SDK 之类的大依赖。
 - 工具固定 8 个，名称和参数是两个适配层共同的契约，改动要同时考虑两边。
 - 误报按 bug 处理：改 `lib/policy.js` 时，同时在 `test/safety.test.mjs` 补上拦截和放行的用例。
 

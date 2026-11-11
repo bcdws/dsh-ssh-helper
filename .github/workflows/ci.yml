@@ -1,0 +1,107 @@
+name: ci
+
+# What this guards:
+#  - the offline test suites, on every supported Node and on Windows;
+#  - the committed vendor/ssh2.cjs is exactly what `npm run build:vendor`
+#    produces, so a bumped ssh2 can never ship a stale bundle;
+#  - the packed tarball really installs with zero dependencies and answers
+#    `initialize` fast enough for desktop MCP clients (magpie: 30 s).
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test · ${{ matrix.os }} · node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, node: 18 }
+          - { os: ubuntu-latest, node: 20 }
+          - { os: ubuntu-latest, node: 22 }
+          - { os: windows-latest, node: 20 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: node test/run.mjs --offline
+
+  package:
+    name: package · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # Rebuilding must not change a single byte: the bundle is committed, and
+      # `npx -y github:bcdws/dsh-ssh-helper` installs whatever is in the repo.
+      # Linux only — the check compares bytes, and one platform is enough.
+      - if: runner.os == 'Linux'
+        name: vendor bundle is current
+        run: |
+          npm run build:vendor
+          git diff --exit-code -- vendor/
+
+      - name: install the tarball and answer initialize
+        run: node scripts/pack-smoke.mjs
+
+      - if: runner.os == 'Linux'
+        name: pack the tarball for the artifact
+        run: npm pack
+
+      - if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-ssh-helper-tarball
+          path: '*.tgz'
+          if-no-files-found: error
+
+  release:
+    name: attach the tarball to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm pack
+      - name: upload to the tag's release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" ./*.tgz --clobber
+          else
+            gh release create "$tag" ./*.tgz --title "$tag" --generate-notes
+          fi
