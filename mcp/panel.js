@@ -125,10 +125,30 @@ export function createPanel({ config: raw = {}, statePath = mcpStatePath(), runD
     return entry;
   };
 
+  /**
+   * The settings page reads one top-level `analysis`, but each server reports
+   * its own. Aggregate: any server with a model wins; otherwise keep the first
+   * reason so the panel can say why the switch will not call a model.
+   */
+  const analysisFor = () => {
+    const live = instances.filter((instance) => !instance.error);
+    if (live.length === 0) {
+      return { available: false, reason: '没有运行中的 MCP server；启动一个客户端会话后再看', model: null };
+    }
+    for (const instance of live) {
+      if (instance.analysis?.available === true) {
+        return { available: true, reason: null, model: instance.analysis.model ?? null };
+      }
+    }
+    const reason = live.map((instance) => instance.analysis?.reason).find((value) => typeof value === 'string' && value.length > 0);
+    return { available: false, reason: reason ?? '旁路模型不可用', model: null };
+  };
+
   const decorateState = (state) => {
     const rows = state.hosts.map((row) => mergeHost(row, instances));
     return {
       ...state,
+      analysis: analysisFor(),
       hosts: rows,
       totals: {
         hosts: rows.length,

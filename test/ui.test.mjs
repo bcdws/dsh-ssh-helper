@@ -175,6 +175,9 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   check('settings-numbers', /data-setting-input="maxOutputBytes" data-scale="1024"/.test(dshHtml) && /value="32"/.test(dshHtml), 'KB input');
   check('settings-seconds', /data-setting-input="idleTimeoutMs" data-scale="1000"/.test(dshHtml) && /data-setting-input="transferTimeoutMs" data-scale="1000"/.test(dshHtml), 'second inputs');
   check('settings-analysis', dshHtml.includes(TEXT.logAnalysis) && dshHtml.includes('not configured'), 'analysis availability');
+  check('settings-analysis-local', dshHtml.includes('本地规则摘要'), 'an unavailable model must say the local digest is used');
+  const availableHtml = renderSettings({ settings, analysis: { available: true, model: 'fake/model' } }, { mode: 'mcp' });
+  check('settings-analysis-model', availableHtml.includes('当前模型') && availableHtml.includes('fake/model'), 'an available model must be named');
   check('settings-policy', dshHtml.includes(TEXT.policyText) && dshHtml.includes('journalctl'), 'policy prose');
   check('settings-panel-foot', dshHtml.includes('/home/u/.dsh-ssh-mcp/state.json') && dshHtml.includes('示例警告'), 'state path and warnings');
   check('settings-mask', dshHtml.includes('data-setting-toggle="maskAddresses"') && mcpHtml.includes('data-setting-toggle="maskAddresses"'), 'mask switch on both surfaces');

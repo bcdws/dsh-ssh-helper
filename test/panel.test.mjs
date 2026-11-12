@@ -247,6 +247,7 @@ const waitFor = async (predicate, ms = 5000) => {
   check('state-cookie-path', /Path=\/api/.test(state.headers['set-cookie']?.[0] ?? ''), String(state.headers['set-cookie']));
   check('state-no-instances', state.json?.state?.instances?.length === 0, JSON.stringify(state.json?.state?.instances));
   check('state-panel-paths', state.json?.state?.panel?.statePath === statePath, JSON.stringify(state.json?.state?.panel));
+  check('state-analysis-no-server', state.json?.state?.analysis?.available === false && /没有运行中的 MCP server/.test(state.json?.state?.analysis?.reason ?? ''), JSON.stringify(state.json?.state?.analysis));
 
   const noOpen = await raw({ port, path: '/api/action', method: 'POST', headers: { 'x-dsh-ssh-pool-token': token }, body: { action: 'open', alias: 'alpha' } });
   check('open-needs-a-server', noOpen.status === 400 && /no MCP server/.test(noOpen.json?.error ?? ''), JSON.stringify(noOpen.json));
@@ -264,6 +265,9 @@ const waitFor = async (predicate, ms = 5000) => {
   check('panel-sees-server', instance?.client?.name === 'panel-test' && instance?.hostCount === 2, JSON.stringify(state.json?.state?.instances));
   const alphaRow = state.json?.state?.hosts?.find((host) => host.alias === 'alpha');
   check('panel-row-has-instance', alphaRow?.instances?.length === 1 && alphaRow.instances[0].pid === server.child.pid, JSON.stringify(alphaRow));
+  // The settings page reads this top-level field; it must reflect the client's
+  // missing sampling capability instead of staying empty.
+  check('state-analysis-sampling', state.json?.state?.analysis?.available === false && /sampling/.test(state.json?.state?.analysis?.reason ?? ''), JSON.stringify(state.json?.state?.analysis));
 
   const hide = await raw({ port, path: '/api/meta', method: 'POST', headers: { 'x-dsh-ssh-pool-token': token }, body: { alias: 'alpha', hidden: true, remark: 'retired' } });
   check('meta-ok', hide.status === 200 && hide.json?.ok === true, JSON.stringify(hide.json));

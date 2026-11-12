@@ -358,7 +358,14 @@ const numberInput = (name, value, scale, attrs = '') =>
 export function renderSettings(state, { mode }) {
   const s = state?.settings ?? {};
   const analysis = state?.analysis;
-  const analysisNote = analysis && analysis.available === false && analysis.reason ? `（当前不可用：${esc(analysis.reason)}）` : '';
+  // A model-less fallback still works: the analyzer returns a deterministic
+  // local digest, so say that instead of leaving the switch looking broken.
+  const analysisNote =
+    analysis === undefined || analysis === null
+      ? ''
+      : analysis.available === true
+        ? (analysis.model ? `（当前模型：${esc(analysis.model)}）` : '')
+        : `（当前不可用：${esc(analysis.reason ?? '原因未知')}；开启后会返回本地规则摘要，不调用模型）`;
   const panel = state?.panel;
   return `<section class="pane">
   ${
