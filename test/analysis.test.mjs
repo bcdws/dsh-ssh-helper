@@ -44,7 +44,20 @@ check('no-command-suggestion-request', /不要输出可直接执行的命令/.te
 const missing = createAnalyzer({ get: () => undefined }, { warn: () => {} });
 check('missing-llm-status', missing.status().available === false && /LLM/.test(missing.status().reason), JSON.stringify(missing.status()));
 const missingResult = await missing.run({ tool: 'x', target: 'x', text: 'x', bytes: 1 });
-check('missing-llm-error', /LLM/.test(missingResult.error ?? ''), JSON.stringify(missingResult));
+check('missing-llm-local-digest', missingResult.error === undefined && missingResult.local === true && missingResult.model === 'local-rules' && /本地规则摘要/.test(missingResult.summary ?? ''), JSON.stringify(missingResult));
+
+// The local digest is what an MCP client without sampling actually gets.
+const digestText = [
+  '2026-11-12T09:00:20Z ERROR upstream connect() failed (111: Connection refused) while connecting to 10.0.3.17:9000',
+  '2026-11-12T09:00:21Z ERROR upstream connect() failed (111: Connection refused) while connecting to 10.0.3.17:9000',
+  '2026-11-12T09:00:22Z ERROR upstream connect() failed (111: Connection refused) while connecting to 10.0.3.17:9000',
+  '2026-11-12T09:01:33Z WARN  account locked user=deploy after 5 failed attempts ip=203.0.113.44 token=abcdef123456'
+].join('\n');
+const digest = await missing.run({ tool: 'ssh_read', target: '/var/log/app.log', text: digestText, bytes: Buffer.byteLength(digestText) });
+check('local-digest-counts', /×3/.test(digest.summary ?? '') && /Connection refused/i.test(digest.summary ?? ''), JSON.stringify(digest));
+check('local-digest-timeline', /2026-11-12T09:00:20Z → 2026-11-12T09:00:22Z/.test(digest.summary ?? ''), digest.summary);
+check('local-digest-redacted', /<redacted:token>/.test(digest.summary ?? '') && !/abcdef123456/.test(digest.summary ?? ''), digest.summary);
+check('local-digest-full-coverage', digest.analyzedBytes === Buffer.byteLength(digestText) && digest.truncated === false, JSON.stringify({ analyzedBytes: digest.analyzedBytes, truncated: digest.truncated }));
 const failing = createAnalyzer(
   { get: (name) => (name === 'llm' ? { stream: async function* () { throw new Error('boom'); } } : { currentSelection: () => ({ provider: 'p', model: 'm' }) }) },
   { warn: () => {} }
@@ -66,6 +79,32 @@ const longAnalyzer = createAnalyzer({
 const longText = 'x'.repeat(70_000);
 const longResult = await longAnalyzer.run({ tool: 'ssh_run', target: 'big', text: longText, bytes: Buffer.byteLength(longText) });
 check('coverage-truncated', longResult?.truncated === true && longResult?.analyzedBytes === 65_536 && longResult?.inputBytes === 70_000, JSON.stringify({ truncated: longResult?.truncated, analyzedBytes: longResult?.analyzedBytes, inputBytes: longResult?.inputBytes }));
+
+// A long log whose failure sits past the first 64 KB must still reach the model:
+// error lines are selected first, then the head fills the remaining budget.
+let priorityCaptured;
+const priorityAnalyzer = createAnalyzer({
+  get: (name) =>
+    name === 'llm'
+      ? {
+          stream: async function* (options) {
+            priorityCaptured = options;
+            yield { type: 'text-delta', text: 'ok' };
+            yield { type: 'finish', reason: { kind: 'stop' } };
+          }
+        }
+      : { currentSelection: () => ({ provider: 'p', model: 'm' }) }
+}, { warn: () => {} });
+const logLines = [];
+for (let i = 0; i < 3000; i += 1) logLines.push(`2026-11-12T08:00:00Z INFO  GET /api/v1/items 200 ${i}ms`);
+for (let i = 0; i < 40; i += 1) logLines.push(`2026-11-12T10:50:${String(i % 60).padStart(2, '0')}Z ERROR db query timeout table=orders`);
+logLines.push('2026-11-12T10:51:00Z FATAL healthcheck failed 5 times, stopping');
+const errorLog = logLines.join('\n');
+const priorityResult = await priorityAnalyzer.run({ tool: 'ssh_read', target: '/var/log/app.log', text: errorLog, bytes: Buffer.byteLength(errorLog) });
+const priorityPrompt = priorityCaptured?.messages?.[0]?.content?.[0]?.text ?? '';
+check('error-first-selection', priorityResult.truncated === true && priorityResult.analyzedBytes <= 65_536 && /ERROR db query timeout/.test(priorityPrompt) && /FATAL healthcheck/.test(priorityPrompt), JSON.stringify({ analyzedBytes: priorityResult.analyzedBytes, inputBytes: priorityResult.inputBytes }));
+check('error-first-head-context', /INFO {2}GET \/api\/v1\/items/.test(priorityPrompt), 'head lines should fill the remaining budget');
+check('error-first-gap-marker', /行省略/.test(priorityPrompt), 'non-contiguous selections must be marked');
 check('truncation-guard-in-prompt', /是否截断: 是/.test(longCaptured?.messages?.[0]?.content?.[0]?.text ?? '') && /不要声称总条数/.test(longCaptured?.system ?? ''), 'truncated input must be declared to the model');
 
 const capped = createAnalyzer({

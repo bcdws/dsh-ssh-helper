@@ -179,7 +179,8 @@ const CONFIG = { maxOutputBytes: 32768, defaultTimeoutMs: 30000 };
 
   const none = unavailableAnalyzer('no model on this host');
   check('unavailable-status', none.status().available === false && none.status().reason === 'no model on this host', JSON.stringify(none.status()));
-  check('unavailable-run', (await none.run({ text: 'x' })).error === 'no model on this host', 'run must report the reason');
+  const unavailableRun = await none.run({ text: 'x' });
+  check('unavailable-run', unavailableRun.local === true && unavailableRun.reason === 'no model on this host' && /本地规则摘要/.test(unavailableRun.summary ?? ''), 'run must fall back to the local digest and keep the reason');
   check('missing-backend', createSideAnalyzer({}).status().available === false, 'no backend means unavailable');
 }
 
