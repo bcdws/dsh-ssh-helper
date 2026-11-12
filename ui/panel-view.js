@@ -7,38 +7,41 @@
  * the whole layout is testable in plain Node. Every interpolated value goes
  * through `esc`.
  *
+ * Every host is a self-contained card (address, key, status, switches,
+ * overrides, failures, sessions, MCP process rows); there is no side panel.
+ *
  * Interaction hooks are `data-*` attributes; the element wires them:
- *   data-tab, data-select, data-close-drawer, data-action (+ data-alias,
- *   data-pid), data-toggle (+ data-alias, data-field), data-setting-toggle,
- *   data-meta-input (+ data-alias, data-field), data-setting-input
- *   (+ data-scale), data-edit, data-float, data-close-panel, data-refresh,
- *   data-close-all, dialog: data-dialog-cancel / form submit.
+ *   data-tab, data-action (+ data-alias, data-pid), data-toggle
+ *   (+ data-alias, data-field), data-setting-toggle, data-meta-input
+ *   (+ data-alias, data-field), data-setting-input (+ data-scale), data-edit,
+ *   data-float, data-close-panel, data-refresh, data-close-all, dialog:
+ *   data-dialog-cancel / form submit.
  *
  * @module dsh-ssh-helper/ui/panel-view
  */
 
 export const TEXT = {
   title: 'SSH 助手',
-  subtitleDsh: '常驻连接池：同一连接复用，无需重复握手',
-  subtitleMcp: '本机所有 dsh-ssh-mcp 进程：主机、设置和实时连接',
+  subtitleDsh: '常驻连接池：同一连接复用',
+  subtitleMcp: '本机所有 dsh-ssh-mcp 进程与连接',
   tabs: { hosts: '主机', processes: '进程', settings: '设置', diagnostics: '诊断' },
   refresh: '刷新',
   float: '浮窗',
   close: '关闭',
   closeAll: '全部断开',
   open: '连接',
-  openFrom: '连接…',
   disconnect: '断开',
   retry: '重试',
   states: { ready: '已连接', connecting: '连接中', idle: '未连接', down: '已断开', paused: '已暂停' },
   prod: '生产',
+  prodShort: '只提醒，不拦截',
   hidden: '隐藏',
   visible: '可见',
   sessions: '会话',
   commands: '命令',
   noHosts: '没有可用的 SSH 主机：检查 ~/.ssh/config 或插件配置。',
-  hostsNoteDsh: '「隐藏」后任何会话都看不到、也连不上它，当前连接会立即断开；点开一行查看详情和修改。',
-  hostsNoteMcp: '「隐藏」后任何 MCP 会话都看不到、也连不上它，各进程约 1 秒内断开现有连接；状态汇总自所有进程。',
+  hostsNoteDsh: '「隐藏」后任何会话都看不到、也连不上它，当前连接会立即断开；每台主机的详情和开关都在卡片上。',
+  hostsNoteMcp: '「隐藏」后任何 MCP 会话都看不到、也连不上它，各进程约 1 秒内断开现有连接；每台主机的详情、开关和各进程连接都在卡片上。',
   prodHint: '生产服务器（实际业务在跑）。不拦截命令；agent 在 ssh_hosts 和每次改动类调用的结果里都会看到 [PROD] 提醒，先说明影响、取得你的确认再重启、删除或改配置/数据。',
   hiddenHint: '隐藏后 agent 看不到也连不上该主机，现有连接会被断开；这里仍可管理。',
   idleOverride: '空闲超时',
@@ -50,13 +53,14 @@ export const TEXT = {
   source: '来源',
   sourceConfig: '插件配置',
   edit: '编辑 Host / 密钥',
+  editShort: '编辑',
+  state: '状态',
   connection: '连接',
   lastFailure: '最近失败',
   lastCommand: '最近命令',
   hostKey: '主机密钥',
   perProcess: '各进程',
   noProcesses: '没有正在运行的 MCP 进程。启动一个使用此 server 的客户端会话后，这里会显示它。',
-  chooseProcess: '从上方「各进程」中选择要连接的进程',
   processesNote: '每个客户端会话各起一个 dsh-ssh-mcp 进程，各有自己的连接池；进程启动后会自动出现在这里。',
   followsOther: '跟随其他状态文件，这里的隐藏/设置对它无效',
   closeProcess: '断开它的全部连接',
@@ -186,156 +190,121 @@ const liveInstances = (state) => (state?.instances ?? []).filter((instance) => !
 const clientName = (instance) =>
   instance?.client && typeof instance.client.name === 'string' ? `${instance.client.name}${instance.client.version ? ` ${instance.client.version}` : ''}` : '（未初始化）';
 
-/** The row's primary action: connect / disconnect / retry, or "pick a process" in MCP with several servers. */
+/** Header action: with exactly one MCP server (or in DSH) connect / disconnect / retry; with none or several, the process rows below own it. */
 function primaryAction(host, state, mode) {
+  if (mode === 'mcp' && liveInstances(state).length !== 1) return '';
   const { key } = hostState(host);
   const alias = esc(host.alias);
   if (key === 'ready' || key === 'connecting') return `<button type="button" class="btn sm" data-action="close" data-alias="${alias}">${TEXT.disconnect}</button>`;
-  if (mode === 'mcp') {
-    const live = liveInstances(state);
-    if (live.length === 0) return `<button type="button" class="btn sm" disabled title="${esc(TEXT.noProcesses)}">${TEXT.open}</button>`;
-    if (live.length > 1) return `<button type="button" class="btn sm primary" data-select="${alias}">${TEXT.openFrom}</button>`;
-  }
   return `<button type="button" class="btn sm primary" data-action="open" data-alias="${alias}">${key === 'paused' ? TEXT.retry : TEXT.open}</button>`;
 }
 
-function hostSummary(host) {
-  const parts = [];
-  const { label } = hostState(host);
-  parts.push(label);
+/** The always-visible status line: state, uptime, sessions, commands. */
+function hostStatus(host) {
+  const { key, label } = hostState(host);
+  const parts = [label];
+  if (key === 'ready' && host.connectedSeconds) parts.push(`已连 ${span(host.connectedSeconds)}`);
   const sessions = host.sessions?.length ?? 0;
   if (sessions > 0) parts.push(`${sessions} ${TEXT.sessions}`);
   if ((host.commands ?? 0) > 0) parts.push(`${host.commands} ${TEXT.commands}`);
-  if (Array.isArray(host.instances) && host.instances.filter((report) => report.connected).length > 1) {
-    parts.push(`${host.instances.filter((report) => report.connected).length} 个进程`);
-  }
   return parts.map(esc).join(' · ');
 }
 
-export function renderHostRow(host, { state, mode, selected }) {
-  const { key } = hostState(host);
-  const failure = host.lastFailure
-    ? `<span class="fail" title="${esc(`${host.lastFailure.tool}: ${host.lastFailure.message}`)}">${esc(host.lastFailure.code)} · ${esc(age(host.lastFailure.ageSeconds))}</span>`
-    : host.lastError && key !== 'ready'
-      ? `<span class="fail" title="${esc(host.lastError)}">${esc(host.lastError)}</span>`
-      : '';
-  return `<div class="row${selected ? ' selected' : ''}" data-select="${esc(host.alias)}" role="button" tabindex="0" aria-label="${esc(host.alias)}">
-  <span class="dot ${key}"></span>
-  <div class="who">
-    <div class="name"><span class="ell">${esc(host.alias)}</span>${host.prod ? badge('PROD', 'prod', TEXT.prodHint) : ''}${host.hidden ? badge(TEXT.hidden, 'muted', TEXT.hiddenHint) : ''}</div>
-    <div class="sub ell">${esc(host.user ?? '')}@${esc(host.host)}:${esc(host.port)}</div>
-  </div>
-  <div class="what">
-    <div class="ell">${hostSummary(host)}${host.remark ? ` · <span class="remark">${esc(host.remark)}</span>` : ''}</div>
-    ${failure ? `<div class="ell">${failure}</div>` : ''}
-  </div>
-  <div class="act">${primaryAction(host, state, mode)}</div>
-  <span class="chev">${icon('chevron')}</span>
-</div>`;
+/** Connection counters, only the ones that are non-zero. */
+function hostCounters(host) {
+  return [host.connects ? `${host.connects} 次建连` : '', host.reconnects ? `${host.reconnects} 次重连` : '', host.failures ? `${host.failures} 次建连失败` : '', host.handshakeTimeouts ? `${host.handshakeTimeouts} 次握手超时` : '']
+    .filter(Boolean)
+    .map(esc)
+    .join(' · ');
 }
 
-export function renderHosts(state, { mode, selected }) {
+/** One row per live MCP server, with its own connect/disconnect. */
+function processRows(host, state) {
+  const instances = liveInstances(state);
+  if (instances.length === 0) return `<div class="muted small">${TEXT.noProcesses}</div>`;
+  const reports = new Map((host.instances ?? []).map((report) => [report.pid, report]));
+  return instances
+    .map((instance) => {
+      const { key, label } = hostState(reports.get(instance.pid) ?? { state: 'idle' });
+      const connected = key === 'ready' || key === 'connecting';
+      return `<div class="proc"><span class="dot ${key}"></span><span class="ell">${esc(clientName(instance))} <span class="muted small">pid ${esc(instance.pid)}</span></span><span class="muted small">${esc(label)}</span><button type="button" class="btn sm${connected ? '' : ' primary'}" data-action="${connected ? 'close' : 'open'}" data-alias="${esc(host.alias)}" data-pid="${esc(instance.pid)}">${connected ? TEXT.disconnect : TEXT.open}</button></div>`;
+    })
+    .join('');
+}
+
+const field = (label, value) => `<div class="kv"><span class="k">${esc(label)}</span><span class="v">${value}</span></div>`;
+
+/**
+ * One host as a self-contained card: identity, address and key, status,
+ * counters, the two switches and the per-host overrides, failures, the last
+ * command, sessions, and (MCP) the process rows. Everything is visible at
+ * once — no side panel to open.
+ */
+export function renderHostCard(host, { state, mode }) {
+  const { key } = hostState(host);
+  const alias = esc(host.alias);
+  const editable = host.source === 'ssh-config';
+  const idle = host.idleTimeoutMs === null || host.idleTimeoutMs === undefined ? '' : String(Math.round(host.idleTimeoutMs / 1000));
+  const effective = Math.round((host.effectiveIdleTimeoutMs ?? 0) / 1000);
+  const sessions = host.sessions ?? [];
+  const counters = hostCounters(host);
+  const failures = [
+    host.lastFailure
+      ? `<div class="failure"><b>${esc(host.lastFailure.code)}</b> · ${esc(host.lastFailure.tool)} · ${esc(age(host.lastFailure.ageSeconds))}${host.callFailures ? ` · 共 ${esc(host.callFailures)} 次` : ''}<div class="msg">${esc(host.lastFailure.message)}</div></div>`
+      : '',
+    host.lastError && key !== 'ready' ? `<div class="failure"><b>${TEXT.connection}</b><div class="msg">${esc(host.lastError)}</div></div>` : ''
+  ]
+    .filter(Boolean)
+    .join('');
+  return `<article class="host" data-alias="${alias}">
+  <header class="host-head">
+    <span class="dot ${key}"></span>
+    <div class="host-id"><span class="name ell">${alias}</span>${host.prod ? badge('PROD', 'prod', TEXT.prodHint) : ''}${host.hidden ? badge(TEXT.hidden, 'muted', TEXT.hiddenHint) : ''}</div>
+    <div class="host-actions">${primaryAction(host, state, mode)}${editable ? `<button type="button" class="btn sm ghost" data-edit="${alias}">${TEXT.editShort}</button>` : ''}</div>
+  </header>
+  <div class="facts">
+    ${field(TEXT.address, `${esc(host.user ?? '')}@${esc(host.host)}:${esc(host.port)}`)}
+    ${field(TEXT.key, esc(host.keyName ?? '—'))}
+    ${editable ? '' : field(TEXT.source, TEXT.sourceConfig)}
+    ${host.hostKey ? field(TEXT.hostKey, `${esc(host.hostKey.status)}${host.hostKey.type ? ` · ${esc(host.hostKey.type)}` : ''}`) : ''}
+    ${field(TEXT.state, hostStatus(host))}
+  </div>
+  ${counters ? `<div class="muted small">${counters}</div>` : ''}
+  <div class="host-controls">
+    <div class="switch-row" title="${esc(TEXT.hiddenHint)}"><span class="toggle-label${host.hidden ? '' : ' on'}">${TEXT.visible}</span>${switchHtml({ checked: host.hidden === true, neutral: true, label: TEXT.hiddenHint, attrs: `data-toggle data-field="hidden" data-alias="${alias}"` })}<span class="toggle-label${host.hidden ? ' on' : ''}">${TEXT.hidden}</span></div>
+    <div class="switch-row" title="${esc(TEXT.prodHint)}">${switchHtml({ checked: host.prod === true, danger: true, label: TEXT.prodHint, attrs: `data-toggle data-field="prod" data-alias="${alias}"` })}<span class="toggle-label prod${host.prod ? ' on' : ''}">${TEXT.prod}</span>${host.prod ? `<span class="hint">${TEXT.prodShort}</span>` : ''}</div>
+    <label class="inline-field" title="${esc(TEXT.idleOverrideDesc)}"><span>${TEXT.idleOverride}</span><input class="num" type="number" min="0" inputmode="numeric" placeholder="全局 ${effective}" value="${esc(idle)}" data-meta-input data-field="idleTimeoutMs" data-alias="${alias}"></label>
+  </div>
+  <label class="inline-field wide"><span>${TEXT.remark}</span><input class="text" maxlength="500" placeholder="${TEXT.remarkPlaceholder}" value="${esc(host.remark ?? '')}" data-meta-input data-field="remark" data-alias="${alias}"></label>
+  ${failures}
+  ${
+    host.lastCommand
+      ? `<div class="host-line"><span class="k">${TEXT.lastCommand}</span><code class="cmd-inline" title="${esc(host.lastCommand)}">${esc(host.lastCommand)}</code><span class="muted small">${esc(age(host.lastCommandAgeSeconds ?? host.lastCommandSeconds))}</span></div>`
+      : ''
+  }
+  ${
+    sessions.length > 0
+      ? `<div class="host-procs"><div class="block-title">${TEXT.sessions} <span class="count">${sessions.length}</span></div>${sessions
+          .map(
+            (session) =>
+              `<div class="proc"><span class="dot ${session.alive === false ? 'down' : 'ready'}"></span><span class="ell">${esc(session.name)} <span class="muted small">${esc(session.ownerShort ?? session.owner ?? '')}</span></span><span class="muted small">${esc(session.commands ?? 0)} ${TEXT.commands}${session.idleSeconds !== undefined ? ` · 空闲 ${esc(span(session.idleSeconds))}` : ''}</span></div>`
+          )
+          .join('')}</div>`
+      : ''
+  }
+  ${mode === 'mcp' ? `<div class="host-procs"><div class="block-title">${TEXT.perProcess}</div>${processRows(host, state)}</div>` : ''}
+</article>`;
+}
+
+export function renderHosts(state, { mode }) {
   const hosts = state?.hosts ?? [];
   const hidden = hosts.filter((host) => host.hidden).length;
   const prod = hosts.filter((host) => host.prod).length;
   const chips = [hidden ? badge(`${hidden} 台隐藏`, 'muted') : '', prod ? badge(`${prod} 台生产`, 'prod') : ''].join('');
   return `<section class="pane">
   <div class="note">${mode === 'mcp' ? TEXT.hostsNoteMcp : TEXT.hostsNoteDsh}${chips ? ` <span class="chips">${chips}</span>` : ''}</div>
-  ${hosts.length === 0 ? `<div class="empty">${TEXT.noHosts}</div>` : `<div class="list">${hosts.map((host) => renderHostRow(host, { state, mode, selected: host.alias === selected })).join('')}</div>`}
+  ${hosts.length === 0 ? `<div class="empty">${TEXT.noHosts}</div>` : `<div class="hosts">${hosts.map((host) => renderHostCard(host, { state, mode })).join('')}</div>`}
 </section>`;
-}
-
-// ── drawer ──────────────────────────────────────────────────────────────────
-
-const field = (label, value) => `<div class="kv"><span class="k">${esc(label)}</span><span class="v">${value}</span></div>`;
-
-export function renderDrawer(host, { state, mode }) {
-  if (!host) return '';
-  const alias = esc(host.alias);
-  const { key, label } = hostState(host);
-  const editable = host.source === 'ssh-config';
-  const idle = host.idleTimeoutMs === null || host.idleTimeoutMs === undefined ? '' : String(Math.round(host.idleTimeoutMs / 1000));
-  const effective = Math.round((host.effectiveIdleTimeoutMs ?? 0) / 1000);
-  const sessions = host.sessions ?? [];
-  const instances = mode === 'mcp' ? liveInstances(state) : [];
-  const reports = new Map((host.instances ?? []).map((report) => [report.pid, report]));
-
-  const stats = [
-    `${host.connects ?? 0} 次建连`,
-    host.reconnects ? `${host.reconnects} 次重连` : '',
-    host.failures ? `${host.failures} 次建连失败` : '',
-    host.handshakeTimeouts ? `${host.handshakeTimeouts} 次握手超时` : '',
-    key === 'ready' && host.connectedSeconds ? `已连 ${span(host.connectedSeconds)}` : ''
-  ]
-    .filter(Boolean)
-    .map(esc)
-    .join(' · ');
-
-  return `<aside class="drawer" role="dialog" aria-label="${alias}">
-  <div class="drawer-head">
-    <span class="dot ${key}"></span>
-    <div class="who"><div class="name"><span class="ell">${alias}</span>${host.prod ? badge('PROD', 'prod', TEXT.prodHint) : ''}${host.hidden ? badge(TEXT.hidden, 'muted') : ''}</div><div class="sub">${esc(label)}${stats ? ` · ${stats}` : ''}</div></div>
-    <button type="button" class="btn icon ghost" data-close-drawer aria-label="${TEXT.close}">${icon('close')}</button>
-  </div>
-  <div class="drawer-body">
-    <div class="block">
-      ${field(TEXT.address, `${esc(host.user ?? '')}@${esc(host.host)}:${esc(host.port)}`)}
-      ${field(TEXT.key, esc(host.keyName ?? '—'))}
-      ${editable ? '' : field(TEXT.source, TEXT.sourceConfig)}
-      ${host.hostKey ? field(TEXT.hostKey, `${esc(host.hostKey.status)}${host.hostKey.type ? ` · ${esc(host.hostKey.type)}` : ''}`) : ''}
-      ${editable ? `<button type="button" class="btn sm" data-edit="${alias}">${TEXT.edit}</button>` : ''}
-    </div>
-    <div class="block">
-      <div class="switch-row" title="${esc(TEXT.hiddenHint)}"><span class="toggle-label${host.hidden ? '' : ' on'}">${TEXT.visible}</span>${switchHtml({ checked: host.hidden === true, neutral: true, label: TEXT.hiddenHint, attrs: `data-toggle data-field="hidden" data-alias="${alias}"` })}<span class="toggle-label${host.hidden ? ' on' : ''}">${TEXT.hidden}</span></div>
-      <div class="switch-row" title="${esc(TEXT.prodHint)}">${switchHtml({ checked: host.prod === true, danger: true, label: TEXT.prodHint, attrs: `data-toggle data-field="prod" data-alias="${alias}"` })}<span class="toggle-label prod${host.prod ? ' on' : ''}">${TEXT.prod}</span><span class="hint">${host.prod ? '只提醒，不拦截' : ''}</span></div>
-      <label class="field"><span>${TEXT.idleOverride}<em>${TEXT.idleOverrideDesc}</em></span><input class="num" type="number" min="0" inputmode="numeric" placeholder="全局 ${effective}" value="${esc(idle)}" data-meta-input data-field="idleTimeoutMs" data-alias="${alias}"></label>
-      <label class="field"><span>${TEXT.remark}</span><input class="text" maxlength="500" placeholder="${TEXT.remarkPlaceholder}" value="${esc(host.remark ?? '')}" data-meta-input data-field="remark" data-alias="${alias}"></label>
-    </div>
-    ${
-      mode === 'mcp'
-        ? `<div class="block"><div class="block-title">${TEXT.perProcess}</div>${
-            instances.length === 0
-              ? `<div class="muted small">${TEXT.noProcesses}</div>`
-              : instances
-                  .map((instance) => {
-                    const report = reports.get(instance.pid);
-                    const live = report ? hostState(report) : { key: 'idle', label: TEXT.states.idle };
-                    const connected = live.key === 'ready' || live.key === 'connecting';
-                    return `<div class="proc"><span class="dot ${live.key}"></span><span class="ell">${esc(clientName(instance))} <span class="muted small">pid ${esc(instance.pid)}</span></span><span class="muted small">${esc(live.label)}</span><button type="button" class="btn sm${connected ? '' : ' primary'}" data-action="${connected ? 'close' : 'open'}" data-alias="${alias}" data-pid="${esc(instance.pid)}">${connected ? TEXT.disconnect : TEXT.open}</button></div>`;
-                  })
-                  .join('')
-          }</div>`
-        : ''
-    }
-    ${
-      host.lastFailure || host.lastError
-        ? `<div class="block"><div class="block-title">${TEXT.lastFailure}</div>${
-            host.lastFailure
-              ? `<div class="failure"><b>${esc(host.lastFailure.code)}</b> · ${esc(host.lastFailure.tool)} · ${esc(age(host.lastFailure.ageSeconds))}${host.callFailures ? ` · 共 ${esc(host.callFailures)} 次` : ''}<div class="msg">${esc(host.lastFailure.message)}</div></div>`
-              : ''
-          }${host.lastError ? `<div class="failure"><b>${TEXT.connection}</b><div class="msg">${esc(host.lastError)}</div></div>` : ''}</div>`
-        : ''
-    }
-    ${
-      host.lastCommand
-        ? `<div class="block"><div class="block-title">${TEXT.lastCommand}</div><code class="cmd">${esc(host.lastCommand)}</code><div class="muted small">${esc(age(host.lastCommandAgeSeconds ?? host.lastCommandSeconds))}</div></div>`
-        : ''
-    }
-    ${
-      sessions.length > 0
-        ? `<div class="block"><div class="block-title">${TEXT.sessions} <span class="count">${sessions.length}</span></div>${sessions
-            .map(
-              (session) =>
-                `<div class="proc"><span class="dot ${session.alive === false ? 'down' : 'ready'}"></span><span class="ell">${esc(session.name)} <span class="muted small">${esc(session.ownerShort ?? session.owner ?? '')}</span></span><span class="muted small">${esc(session.commands ?? 0)} ${TEXT.commands}${session.idleSeconds !== undefined ? ` · 空闲 ${esc(span(session.idleSeconds))}` : ''}</span></div>`
-            )
-            .join('')}</div>`
-        : ''
-    }
-  </div>
-  <div class="drawer-foot${mode === 'mcp' && liveInstances(state).length > 1 ? ' hint' : ''}">${
-    mode === 'mcp' && liveInstances(state).length > 1 ? TEXT.chooseProcess : primaryAction(host, state, mode).replace(' sm', '')
-  }</div>
-</aside>`;
 }
 
 // ── processes (MCP) ─────────────────────────────────────────────────────────

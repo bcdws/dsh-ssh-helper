@@ -21,7 +21,6 @@
 import {
   TEXT,
   renderBanners,
-  renderDrawer,
   renderEditDialog,
   renderFooter,
   renderHeader,
@@ -56,7 +55,9 @@ button,input{font:inherit;color:inherit}
 .sub{font-size:12px;color:var(--fg2)}
 .row .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .grow{flex:1}
-.actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.actions{display:flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end}
+.titles{min-width:0}
+.titles .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tabs{display:flex;gap:2px;padding:0 20px;border-bottom:1px solid var(--b1);flex:0 0 auto;overflow-x:auto}
 .tab{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border:0;border-bottom:2px solid transparent;background:none;color:var(--fg2);cursor:pointer;white-space:nowrap;margin-bottom:-1px}
 .tab:hover{color:var(--fg)}
@@ -69,16 +70,12 @@ button,input{font:inherit;color:inherit}
 .chips{display:inline-flex;gap:6px;margin-left:4px;vertical-align:middle}
 .empty{padding:28px 16px;text-align:center;color:var(--fg2);border:1px dashed var(--b1);border-radius:12px}
 .list{border:1px solid var(--b1);border-radius:12px;background:var(--l1);overflow:hidden}
-.row{display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;outline:none;min-height:56px}
+.row{display:flex;align-items:center;gap:12px;padding:10px 14px;min-height:56px}
 .row+.row{border-top:1px solid var(--b1)}
-.row:hover,.row:focus-visible{background:var(--l2)}
-.row.selected{background:color-mix(in srgb,var(--brand) 9%,var(--l1));box-shadow:inset 3px 0 0 var(--brand)}
-.row.static{cursor:default}
 .who{flex:0 0 210px;min-width:0}
 .row.static .who{flex:0 1 auto;max-width:46%}
 .what{flex:1 1 auto;min-width:0;color:var(--fg2);font-size:12px;line-height:18px}
 .act{flex:0 0 auto}
-.chev{flex:0 0 auto;color:var(--fg2);display:flex;opacity:.6}
 .name{display:flex;align-items:center;gap:6px;font-weight:600;min-width:0}
 .ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .remark{color:var(--fg)}
@@ -118,20 +115,26 @@ button,input{font:inherit;color:inherit}
 .num:focus,.text:focus{outline:none;border-color:var(--brand)}
 .field{display:flex;flex-direction:column;gap:6px}
 .field>span{font-size:12px;color:var(--fg2);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
-.field em{font-style:normal;font-size:11px;opacity:.8}
-.drawer-scrim{position:absolute;inset:0;background:rgba(0,0,0,.18);z-index:20}
-.drawer{position:absolute;top:0;right:0;bottom:0;width:min(400px,100%);z-index:21;display:flex;flex-direction:column;background:var(--overlay);border-left:1px solid var(--b1);box-shadow:-16px 0 40px rgba(0,0,0,.18);animation:slide .16s ease-out}
-@keyframes slide{from{transform:translateX(24px);opacity:.4}to{transform:none;opacity:1}}
-.drawer-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--b1)}
-.drawer-head .who{flex:1 1 auto}
-.drawer-body{flex:1 1 auto;overflow:auto;padding:4px 16px 16px}
-.drawer-foot{padding:12px 16px;border-top:1px solid var(--b1);display:flex;justify-content:flex-end}
-.drawer-foot .btn{min-width:110px}
-.drawer-foot.hint{justify-content:flex-start;color:var(--fg2);font-size:12px}
-.block{display:flex;flex-direction:column;gap:10px;padding:14px 0}
-.block+.block{border-top:1px solid var(--b1)}
+.hosts{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:12px;align-items:start}
+.host{display:flex;flex-direction:column;gap:10px;padding:14px 16px;border:1px solid var(--b1);border-radius:12px;background:var(--l1);min-width:0}
+.host-head{display:flex;align-items:center;gap:10px}
+.host-id{display:flex;align-items:center;gap:6px;flex:1;min-width:0}
+.host-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.facts{display:grid;grid-template-columns:1fr 1fr;gap:5px 18px}
+.kv{display:flex;gap:8px;font-size:12.5px;min-width:0}
+.facts .kv:last-child:nth-child(odd){grid-column:1 / -1}
+.kv .k{flex:0 0 auto;color:var(--fg2)}
+.kv .v{flex:1;min-width:0;overflow-wrap:anywhere}
+.host-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding-top:10px;border-top:1px solid var(--b1)}
+.inline-field{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg2);min-width:0}
+.inline-field.wide{width:100%}
+.inline-field.wide .text{flex:1;height:30px}
+.inline-field .num{width:76px;height:28px}
+.host-line{display:flex;align-items:center;gap:8px;font-size:12px;min-width:0}
+.host-line .k{color:var(--fg2);flex:0 0 auto}
+.cmd-inline{flex:1;min-width:0;padding:5px 8px;border-radius:7px;background:var(--l2);font:11.5px/16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.host-procs{display:flex;flex-direction:column;gap:7px;padding-top:10px;border-top:1px solid var(--b1)}
 .block-title{font-size:12px;font-weight:600;color:var(--fg2);display:flex;align-items:center;gap:6px}
-.block>.btn{align-self:flex-start}
 .kv{display:flex;gap:12px;font-size:12.5px}
 .k{flex:0 0 64px;color:var(--fg2)}
 .v{flex:1;min-width:0;overflow-wrap:anywhere}
@@ -140,7 +143,6 @@ button,input{font:inherit;color:inherit}
 .proc .ell{flex:1}
 .failure{font-size:12px;color:var(--err)}
 .failure .msg{color:var(--fg2);margin-top:2px;overflow-wrap:anywhere}
-.cmd{display:block;padding:8px 10px;border-radius:8px;background:var(--l2);font:11.5px/17px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}
 .group{display:flex;flex-direction:column;gap:8px}
 .group-title{font-size:12px;font-weight:600;color:var(--fg2);letter-spacing:.03em}
 .card{border:1px solid var(--b1);border-radius:12px;background:var(--l1);padding:2px 16px}
@@ -186,6 +188,9 @@ code{font:11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 }
 @container (max-width:520px){
   .row{flex-wrap:wrap}.what{flex-basis:100%;order:3;padding-left:21px}.who{flex:1 1 auto}
+  .hosts{grid-template-columns:1fr}
+  .facts{grid-template-columns:1fr}
+  .host{padding:12px}
 }
 `;
 
@@ -201,7 +206,6 @@ class SshHelperPanel extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this.state = null;
     this.tab = 'hosts';
-    this.selected = null;
     this.error = null;
     this.notice = null;
     this.busy = false;
@@ -317,25 +321,19 @@ class SshHelperPanel extends HTMLElement {
 
   render(force = false) {
     if (!force && this.editing()) return;
-    const options = { mode: this.mode, selected: this.selected };
+    const options = { mode: this.mode };
     if (!tabsFor(this.mode).includes(this.tab)) this.tab = 'hosts';
-    const host = this.selected === null ? null : (this.state?.hosts ?? []).find((candidate) => candidate.alias === this.selected) ?? null;
-    if (this.selected !== null && host === null && this.state !== null) this.selected = null;
     const bodyScroll = this.shadowRoot.querySelector('.body')?.scrollTop ?? 0;
-    const drawerScroll = this.shadowRoot.querySelector('.drawer-body')?.scrollTop ?? 0;
     this.frame.innerHTML = [
       renderHeader({ mode: this.mode, floatable: this.hasAttribute('floatable'), closable: this.hasAttribute('closable'), busy: this.busy }),
       renderTabs({ mode: this.mode, tab: this.tab, state: this.state }),
       renderBanners({ error: this.error, notice: this.notice }),
       `<div class="body">${this.state === null ? `<div class="loading">${this.error ? '' : TEXT.loading}</div>` : renderTab(this.tab, this.state, options)}</div>`,
       renderFooter(this.state, { mode: this.mode }),
-      host && this.tab === 'hosts' ? `<div class="drawer-scrim" data-close-drawer></div>${renderDrawer(host, { state: this.state, mode: this.mode })}` : '',
       this.dialog ? renderEditDialog(this.dialog.host, this.dialog) : ''
     ].join('');
     const body = this.shadowRoot.querySelector('.body');
     if (body) body.scrollTop = bodyScroll;
-    const drawer = this.shadowRoot.querySelector('.drawer-body');
-    if (drawer) drawer.scrollTop = drawerScroll;
   }
 
   // ── interaction ─────────────────────────────────────────────────────────
@@ -353,7 +351,7 @@ class SshHelperPanel extends HTMLElement {
     root.addEventListener('click', (event) => {
       const target = event.target instanceof Element ? event.target : null;
       if (target === null) return;
-      const button = target.closest('button,[data-select],[data-close-drawer]');
+      const button = target.closest('button');
       if (button === null || button.hasAttribute('disabled')) return;
       const d = button.dataset;
       if (d.tab !== undefined) {
@@ -364,10 +362,7 @@ class SshHelperPanel extends HTMLElement {
         if (window.confirm(TEXT.confirmCloseAll)) void this.post('action', { action: 'close_all' });
       } else if (d.float !== undefined) this.emit('ssh-helper-float');
       else if (d.closePanel !== undefined) this.emit('ssh-helper-close');
-      else if (d.closeDrawer !== undefined) {
-        this.selected = null;
-        this.render(true);
-      } else if (d.action !== undefined) {
+      else if (d.action !== undefined) {
         event.stopPropagation();
         const body = { action: d.action, ...(d.alias ? { alias: d.alias } : {}), ...(d.pid ? { pid: Number(d.pid) } : {}) };
         void this.post('action', body);
@@ -380,10 +375,6 @@ class SshHelperPanel extends HTMLElement {
         const host = this.hostByAlias(d.edit);
         if (host) this.openDialog(host);
       } else if (d.dialogCancel !== undefined) this.closeDialog();
-      else if (d.select !== undefined) {
-        this.selected = this.selected === d.select ? null : d.select;
-        this.render(true);
-      }
     });
     root.addEventListener('mousedown', (event) => {
       if (event.target instanceof Element && event.target.matches('[data-dialog-backdrop]') && !this.dialog?.saving) this.closeDialog();
@@ -412,17 +403,9 @@ class SshHelperPanel extends HTMLElement {
       const target = event.target;
       if (event.key === 'Escape') {
         if (this.dialog && !this.dialog.saving) this.closeDialog();
-        else if (this.selected !== null) {
-          this.selected = null;
-          this.render(true);
-        }
         return;
       }
       if (event.key === 'Enter' && target instanceof HTMLInputElement && target.form === null) target.blur();
-      if ((event.key === 'Enter' || event.key === ' ') && target instanceof HTMLElement && target.matches('.row[data-select]')) {
-        event.preventDefault();
-        target.click();
-      }
     });
     root.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -463,7 +446,6 @@ class SshHelperPanel extends HTMLElement {
     this.render(true);
     try {
       await this.call('edit-host', body, { retry: false });
-      if (this.selected === host.alias && body.newAlias) this.selected = body.newAlias;
       this.dialog = null;
       this.render(true);
     } catch (error) {
