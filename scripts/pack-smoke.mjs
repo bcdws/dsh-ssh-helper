@@ -36,6 +36,7 @@ try {
   const tarball = join(work, packed.filename);
   const files = packed.files.map((entry) => entry.path);
   if (!files.includes('vendor/ssh2.cjs')) fail('the tarball must ship vendor/ssh2.cjs');
+  if (!files.includes('mcp/panel.html')) fail('the tarball must ship mcp/panel.html (the panel page)');
 
   writeFileSync(join(work, 'package.json'), JSON.stringify({ name: 'pack-smoke', private: true }));
   execFileSync(npm, ['install', tarball, '--no-audit', '--no-fund', '--offline'], { cwd: work, stdio: 'pipe', ...npmShell });
@@ -48,7 +49,10 @@ try {
   const sshConfig = join(work, 'ssh_config');
   writeFileSync(sshConfig, ['Host probe', '  HostName 192.0.2.10', '  User root', ''].join('\n'));
   const bin = join(installed, 'bin', 'dsh-ssh-mcp.js');
-  const child = spawn(process.execPath, [bin, '--ssh-config', sshConfig, '--quiet'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [bin, '--ssh-config', sshConfig, '--quiet'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, DSH_SSH_MCP_HOME: join(work, 'mcp-home') }
+  });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk) => (stdout += chunk));

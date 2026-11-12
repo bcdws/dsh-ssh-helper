@@ -10,7 +10,7 @@
 ```
 lib/              共享核心：连接池、策略、工具
 index.js  dsh/    DSH 适配层（插件注册、面板、计划模式拦截）
-mcp/      bin/    MCP 适配层（stdio server）
+mcp/      bin/    MCP 适配层（stdio server + 管理面板）
 ```
 
 ## 安装
@@ -43,7 +43,26 @@ dsh plugin --profile <profile> add "link:$PWD"
 }
 ```
 
-需要时可以在 `args` 末尾追加参数：`--config <file.json>`（与插件 config 同名的键，如 `hosts`、`exclude`）、`--ssh-config <path>`、`--state <path>`、`--quiet`。
+需要时可以在 `args` 末尾追加参数：`--config <file.json>`（与插件 config 同名的键，如 `hosts`、`exclude`）、`--ssh-config <path>`、`--state <path>`、`--no-control`、`--quiet`。
+
+#### 管理面板
+
+```bash
+npx -y github:bcdws/dsh-ssh-helper#stable panel --open
+```
+
+在 `http://127.0.0.1:7318/` 打开一个和 DSH 插件面板类似的页面（`--port` 可以换端口）：
+
+- 主机的隐藏、备注、单独的空闲超时，以及输出上限、空闲超时、传输超时、日志旁路分析这几项全局设置；
+- 重命名 Host 和密钥文件（会修改 `~/.ssh/config`，并先备份）；
+- 本机所有正在运行的 MCP 进程（每个客户端会话一个）及其实时连接，可以手动连接或断开。
+
+工作方式：
+
+- 设置保存在 `~/.dsh-ssh-mcp/state.json`，**只有面板写这个文件**，每个 MCP 进程只读跟随，大约 1 秒内生效。隐藏一台主机后，各进程会断开到它的现有连接。
+- 每个 MCP 进程启动后会在 `127.0.0.1` 的随机端口上开一个控制口，并把端口和令牌写进 `~/.dsh-ssh-mcp/run/<pid>.json`（权限 0600），面板通过这个文件找到它。不需要面板时可以加 `--no-control`。
+- 面板和控制口都只接受本机请求，并且会校验 `Host` 头（防 DNS rebinding）；写操作还需要令牌。面板自己不会建立 SSH 连接。
+- `DSH_SSH_MCP_HOME` 可以把上面这个目录换到别处。
 
 **更新**：`stable` 分支只在 CI 全部通过后才前进；npx 每次启动都会重新解析它，所以新版本在下次启动 server 时自动生效，不用重装。想固定版本就把 `#stable` 换成 tag（如 `#v0.6.0`），想跟最新提交就去掉 `#stable`。
 
@@ -51,8 +70,8 @@ dsh plugin --profile <profile> add "link:$PWD"
 
 两种方式互不影响：
 
-- 各有各的连接池；MCP 默认不读 DSH 面板状态，需要跟随时加 `--state ~/.dsh/ssh-pool/state.json`（只读）。
-- 面板里把某台主机设为「隐藏」时，DSH 这一侧会立即断开它（并取消待重连），MCP 进程有自己的连接池，不受影响。
+- 各有各的连接池和状态文件：MCP 默认跟随自己的 `~/.dsh-ssh-mcp/state.json`，不读 DSH 面板的状态。如果想让它跟随 DSH，加 `--state ~/.dsh/ssh-pool/state.json`（只读）；这时 MCP 面板里的隐藏和设置对这个进程不生效，面板会标出来。
+- 在 DSH 面板里隐藏主机，只影响 DSH 的连接池；在 MCP 面板里隐藏主机，只影响跟随 MCP 状态文件的进程。
 - 已经装了插件的 DSH agent 不要再接这个 MCP，否则工具会重复。
 
 ## 工具

@@ -40,6 +40,7 @@
     "lib/**/*.js",
     "dsh/*.js",
     "mcp/*.js",
+    "mcp/*.html",
     "bin/*.js",
     "vendor/*.cjs",
     "vendor/*.LICENSE",

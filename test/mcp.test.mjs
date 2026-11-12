@@ -29,6 +29,8 @@ const sshConfig = join(dir, 'ssh_config');
 const statePath = join(dir, 'state.json');
 writeFileSync(sshConfig, ['Host alpha', '  HostName 192.0.2.10', '  User root', 'Host beta', '  HostName 192.0.2.11', '  User root', ''].join('\n'));
 writeFileSync(statePath, JSON.stringify({ hosts: { beta: { hidden: true } }, settings: {} }));
+// Keep the server's own state file and run dir out of the real home.
+process.env.DSH_SSH_MCP_HOME = join(dir, 'mcp-home');
 
 /** Spawn the server and talk newline-delimited JSON-RPC to it. */
 function startServer({ args = ['--state', statePath], env = process.env } = {}) {

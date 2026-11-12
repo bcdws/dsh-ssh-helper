@@ -4,7 +4,8 @@
  *
  * The transport (stdio today) only supplies `send`; everything SSH-side —
  * host table, read-only assistant state, policy, diagnostics, sampling-backed
- * side analysis — is assembled here once per process.
+ * side analysis, the panel's control port — is assembled here once per
+ * process.
  *
  * @module dsh-ssh-helper/mcp/runtime
  */
@@ -19,6 +20,9 @@ import { createHostRefresher } from '../lib/host-refresh.js';
 import { createMcpSession } from './server.js';
 import { createSamplingBackend } from './sampling.js';
 import { createStateView } from './state-view.js';
+import { createHiddenWatcher } from './hidden-watch.js';
+import { startControlServer } from './control.js';
+import { mcpRunDir, mcpStatePath } from './home.js';
 
 const PACKAGE = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -50,37 +54,37 @@ export function stderrLogger({ quiet = false } = {}) {
  * @param options
  * @param options.config - raw plugin config (same keys as `cordis.patch.yml`).
  * @param options.logger - `{ info, warn }`; defaults to stderr.
- * @returns `{ pool, tools, config, createSession(send), dispose() }`.
+ * @returns `{ pool, tools, config, meta, createSession(send), startControl(), dispose() }`.
  */
 export function createStandaloneRuntime({ config: raw = {}, logger = stderrLogger() } = {}) {
   const config = normalizeConfig(raw);
   const { hosts, warnings } = buildHostTable(config);
   for (const warning of warnings) logger.warn?.(warning);
-  // Independent of DSH by default: the DSH panel state is read (never written)
-  // only when a state file is named explicitly, so hiding a host in DSH does
-  // not silently change what an MCP agent sees.
-  const meta =
-    config.statePath === undefined
-      ? undefined
-      : createStateView({
-          filePath: config.statePath,
-          defaults: {
-            settings: {
-              idleTimeoutMs: config.idleTimeoutMs,
-              maxOutputBytes: config.maxOutputBytes,
-              transferTimeoutMs: config.transferTimeoutMs
-            }
-          }
-        });
+  // Independent of DSH by default: the server follows the MCP panel's own
+  // state file (`~/.dsh-ssh-mcp/state.json`), read-only. `--state` points it at
+  // another file instead, e.g. DSH's, so hiding a host in DSH only affects an
+  // MCP agent when the user asked for that.
+  const followsDsh = config.statePath !== undefined;
+  const meta = createStateView({
+    filePath: config.statePath ?? mcpStatePath(),
+    defaults: {
+      settings: {
+        idleTimeoutMs: config.idleTimeoutMs,
+        maxOutputBytes: config.maxOutputBytes,
+        transferTimeoutMs: config.transferTimeoutMs
+      }
+    }
+  });
   const pool = new SshPool({ hosts, config, logger, warnings, meta });
   const refresh = createHostRefresher({ pool, config, logger });
 
   // The analyzer is built per session (sampling goes back to that client);
   // the tools are built once, so they reach it through this indirection.
   let analyzer = unavailableAnalyzer();
+  const diagnostics = createDiagnostics();
   const tools = createTools(pool, config, {
     policy: createPolicy(),
-    diagnostics: createDiagnostics(),
+    diagnostics,
     analyzer: { status: () => analyzer.status(), run: (input) => analyzer.run(input) }
   });
   const instructions = instructionsFor(createPolicy());
@@ -105,6 +109,12 @@ export function createStandaloneRuntime({ config: raw = {}, logger = stderrLogge
   };
   refreshIfChanged();
 
+  // Hiding a host in the panel closes this process's live connection to it.
+  const watchHidden = createHiddenWatcher({ pool, meta, logger });
+  const hiddenTimer = setInterval(watchHidden, 1000);
+  hiddenTimer.unref?.();
+
+  let currentSession = null;
   const createSession = (send) => {
     const session = createMcpSession({
       tools,
@@ -115,11 +125,44 @@ export function createStandaloneRuntime({ config: raw = {}, logger = stderrLogge
       logger
     });
     analyzer = createSideAnalyzer({ backend: createSamplingBackend(session), logger });
+    currentSession = session;
     return session;
   };
 
-  logger.info?.(`${hosts.size} host(s): ${[...hosts.keys()].join(', ') || 'none'}; ${meta === undefined ? 'standalone (no DSH panel state)' : `following ${meta.filePath} (read-only)`}`);
-  return { pool, tools, config, createSession, dispose: () => pool.dispose() };
+  /** Open the panel's control port and announce this process in the run dir. */
+  let control = null;
+  const startControl = async ({ runDir = mcpRunDir() } = {}) => {
+    try {
+      control = await startControlServer({
+        pool,
+        runDir,
+        logger,
+        describe: () => ({
+          version: PACKAGE.version,
+          client: currentSession?.clientInfo ?? null,
+          statePath: meta.filePath,
+          followsDsh,
+          sshConfigPath: config.useSshConfig ? config.sshConfigPath : null,
+          warnings: [...(pool.warnings ?? [])]
+        }),
+        extraState: () => ({
+          diagnostics: diagnostics.snapshot({ events: 20 }),
+          analysis: analyzer.status()
+        })
+      });
+    } catch (error) {
+      logger.warn?.(`control port unavailable (the panel will not see this server): ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return control;
+  };
+
+  logger.info?.(`${hosts.size} host(s): ${[...hosts.keys()].join(', ') || 'none'}; following ${meta.filePath} (read-only)`);
+  const dispose = () => {
+    clearInterval(hiddenTimer);
+    control?.close();
+    pool.dispose();
+  };
+  return { pool, tools, config, meta, createSession, startControl, dispose };
 }
 
 export { PACKAGE };

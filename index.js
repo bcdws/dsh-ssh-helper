@@ -25,9 +25,7 @@ import { fromDshExecution } from './lib/call-context.js';
 import { commandKind, createDiagnostics } from './lib/diagnostics.js';
 import { createAnalyzer } from './dsh/llm-backend.js';
 import { isDeleteCommand, isLocalSshDelete, isPlanActive } from './dsh/plan-guard.js';
-import { renameIdentityFile } from './lib/keyfile.js';
-import { renameHostAlias } from './lib/hostalias.js';
-import { editHostIdentity } from './lib/edit-host.js';
+import { createHostEditors } from './lib/host-edits.js';
 import { createHostRefresher } from './lib/host-refresh.js';
 
 export const name = 'ssh-pool';
@@ -89,56 +87,7 @@ export function apply(ctx, config = {}) {
    * state read so a host/key added locally appears without reloading the plugin.
    */
   const refreshHosts = createHostRefresher({ pool, config: normalized, logger: ctx.logger });
-  /**
-   * Rename the actual key file and update ~/.ssh/config, then rebuild the host
-   * table so the panel and future connections use the new path.
-   */
-  const renameKey = ({ alias, keyName }) => {
-    const spec = pool.spec(alias);
-    if (spec === undefined) throw new Error(`unknown host "${alias}"`);
-    if (spec.source !== 'ssh-config') {
-      throw new Error('this host comes from plugin config, not ~/.ssh/config; rename its IdentityFile in the bundle config instead');
-    }
-    const result = renameIdentityFile({
-      configPath: normalized.sshConfigPath,
-      identityFile: spec.identityFile,
-      newName: keyName
-    });
-    refreshHosts();
-    ctx.logger?.info?.(`ssh-pool: renamed key ${result.oldName} -> ${result.newName} for ${alias}`);
-    return result;
-  };
-  const renameHost = ({ alias, newAlias }) => {
-    const spec = pool.spec(alias);
-    if (spec === undefined) throw new Error(`unknown host "${alias}"`);
-    if (spec.source !== 'ssh-config') {
-      throw new Error('this host comes from plugin config, not ~/.ssh/config; rename it in the bundle config instead');
-    }
-    const result = renameHostAlias({ configPath: normalized.sshConfigPath, oldAlias: alias, newAlias });
-    store.renameHost(alias, result.newAlias);
-    refreshHosts();
-    ctx.logger?.info?.(`ssh-pool: renamed host ${result.oldAlias} -> ${result.newAlias}`);
-    return result;
-  };
-  /** Atomic combined edit used by the single dialog. */
-  const editHost = ({ alias, newAlias, keyName }) => {
-    const spec = pool.spec(alias);
-    if (spec === undefined) throw new Error(`unknown host "${alias}"`);
-    if (spec.source !== 'ssh-config') {
-      throw new Error('this host comes from plugin config, not ~/.ssh/config; edit it in the bundle config instead');
-    }
-    const result = editHostIdentity({
-      configPath: normalized.sshConfigPath,
-      oldAlias: alias,
-      newAlias,
-      oldKeyPath: spec.identityFile,
-      newKeyName: keyName
-    });
-    if (result.aliasChanged) store.renameHost(alias, result.newAlias);
-    refreshHosts();
-    ctx.logger?.info?.(`ssh-pool: edited ${alias}${result.aliasChanged ? ` -> ${result.newAlias}` : ''}${result.keyChanged ? `; key ${result.oldKeyName} -> ${result.newKeyName}` : ''}`);
-    return result;
-  };
+  const { renameKey, renameHost, editHost } = createHostEditors({ pool, store, config: normalized, refreshHosts, logger: ctx.logger });
   for (const warning of warnings) ctx.logger?.warn?.(`ssh-pool: ${warning}`);
   ctx.logger?.info?.(
     `ssh-pool: ${hosts.size} host(s) available (${[...hosts.keys()].join(', ') || 'none'}), keepalive ${normalized.keepaliveIntervalMs}ms, idle timeout ${normalized.idleTimeoutMs === 0 ? 'never' : `${normalized.idleTimeoutMs}ms`}`
