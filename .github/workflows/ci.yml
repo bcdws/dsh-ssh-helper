@@ -77,15 +77,8 @@ jobs:
         run: node scripts/pack-smoke.mjs
 
       - if: runner.os == 'Linux'
-        name: pack the tarball for the artifact
+        name: pack the tarball
         run: npm pack
-
-      - if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v5
-        with:
-          name: dsh-ssh-helper-tarball
-          path: '*.tgz'
-          if-no-files-found: error
 
   promote:
     name: fast-forward stable
