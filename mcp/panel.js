@@ -18,7 +18,7 @@
  * @module dsh-ssh-helper/mcp/panel
  */
 import { readFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, request } from 'node:http';
 import { buildHostTable, normalizeConfig } from '../lib/config.js';
 import { MetadataStore } from '../lib/store.js';
 import { SshPool } from '../lib/pool.js';
@@ -31,6 +31,10 @@ import { callInstance, listInstances } from './control.js';
 import { mcpRunDir, mcpStatePath } from './home.js';
 
 export const DEFAULT_PANEL_PORT = 7318;
+/** How many ports after the default to try before letting the OS pick one. */
+const FALLBACK_PORTS = 9;
+/** Identity probe: tells a second `panel` run who already holds a port. */
+export const IDENTITY_PATH = '/__dsh-ssh-mcp-panel';
 const PAGE_URL = new URL('./panel.html', import.meta.url);
 const STATE_RANK = { connected: 4, connecting: 3, down: 2, idle: 1 };
 
@@ -191,6 +195,11 @@ export function createPanel({ config: raw = {}, statePath = mcpStatePath(), runD
       send(res, 403, { ok: false, error: 'loopback only' });
       return;
     }
+    if (req.method === 'GET' && url.pathname === IDENTITY_PATH) {
+      // No secrets: just enough for another run to decide "same panel, reuse it".
+      send(res, 200, { ok: true, panel: 'dsh-ssh-mcp', runDir, platform: process.platform, pid: process.pid });
+      return;
+    }
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
       res.writeHead(200, {
         'content-type': 'text/html; charset=utf-8',
@@ -208,26 +217,94 @@ export function createPanel({ config: raw = {}, statePath = mcpStatePath(), runD
 }
 
 /**
- * Listen on `127.0.0.1:port` and serve the panel until the process ends.
- * @returns `Promise<{ url, server, panel }>`; rejects when the port is taken.
+ * Ask whatever listens on `127.0.0.1:port` whether it is a panel.
+ * Plain `node:http`, so a configured HTTP proxy is never involved.
+ * @returns the identity body, or `null` (nothing there, or not a panel).
  */
-export async function servePanel({ port = DEFAULT_PANEL_PORT, ...options } = {}) {
-  const panel = createPanel(options);
-  const server = createServer((req, res) => {
-    panel.handler(req, res).catch((error) => {
-      if (!res.headersSent) send(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
+export function probePanel(port, { timeoutMs = 1500 } = {}) {
+  return new Promise((resolve) => {
+    const req = request({ host: '127.0.0.1', port, path: IDENTITY_PATH, method: 'GET', timeout: timeoutMs }, (res) => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        if (text.length < 4096) text += chunk;
+      });
+      res.on('end', () => {
+        try {
+          const body = JSON.parse(text);
+          resolve(res.statusCode === 200 && body?.panel === 'dsh-ssh-mcp' ? body : null);
+        } catch {
+          resolve(null);
+        }
+      });
     });
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => resolve(null));
+    req.end();
   });
-  await new Promise((resolve, reject) => {
-    server.once('error', (error) => {
-      reject(
-        error?.code === 'EADDRINUSE'
-          ? new Error(`port ${port} is in use — the panel may already be running at http://127.0.0.1:${port}/ (or pass --port)`)
-          : error
-      );
-    });
-    server.listen(port, '127.0.0.1', resolve);
+}
+
+/** Listen on one port; resolves `true`, `false` when taken, rejects otherwise. */
+function tryListen(server, port) {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => {
+      server.off('listening', onListening);
+      if (error?.code === 'EADDRINUSE' || error?.code === 'EACCES') resolve(false);
+      else reject(error);
+    };
+    const onListening = () => {
+      server.off('error', onError);
+      resolve(true);
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port, '127.0.0.1');
   });
-  const actual = server.address().port;
-  return { url: `http://127.0.0.1:${actual}/`, server, panel };
+}
+
+/**
+ * Serve the panel on `127.0.0.1`.
+ *
+ * When the port is taken, the holder is probed first: a panel for the same
+ * run dir is reused (`existing: true`, nothing new is started). Anything else
+ * — another program, a hidden OS reservation, or a panel for a different home
+ * such as the other side of a WSL mirrored network — is skipped: an explicit
+ * `port` then fails, the default walks the next ports and finally lets the OS
+ * pick one.
+ *
+ * `basePort` moves the default range (tests only).
+ *
+ * @returns `Promise<{ url, existing, server?, panel?, skipped }>`; `skipped`
+ *   lists the busy ports and what held them.
+ */
+export async function servePanel({ port, basePort = DEFAULT_PANEL_PORT, ...options } = {}) {
+  const explicit = port !== undefined;
+  const runDir = options.runDir ?? mcpRunDir();
+  const candidates = explicit
+    ? [port]
+    : [...Array.from({ length: FALLBACK_PORTS + 1 }, (_, index) => basePort + index), 0];
+  const server = createServer();
+  const skipped = [];
+  for (const candidate of candidates) {
+    if (await tryListen(server, candidate)) {
+      const panel = createPanel({ ...options, runDir });
+      server.on('request', (req, res) => {
+        panel.handler(req, res).catch((error) => {
+          if (!res.headersSent) send(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
+        });
+      });
+      return { url: `http://127.0.0.1:${server.address().port}/`, existing: false, server, panel, skipped };
+    }
+    const holder = await probePanel(candidate);
+    if (holder !== null && holder.runDir === runDir) {
+      return { url: `http://127.0.0.1:${candidate}/`, existing: true, skipped };
+    }
+    skipped.push({ port: candidate, holder: holder === null ? 'other' : `panel for ${holder.runDir} (${holder.platform})` });
+  }
+  const last = skipped[skipped.length - 1];
+  throw new Error(
+    explicit
+      ? `port ${port} is in use by ${last.holder === 'other' ? 'another program (or a stale OS reservation)' : `a different ${last.holder}`}; pick another --port`
+      : 'no free port for the panel'
+  );
 }

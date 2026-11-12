@@ -14,8 +14,15 @@ import { spawn } from 'node:child_process';
 
 /** Best effort: hand the URL to the desktop's opener. */
 function openBrowser(url, logger) {
+  // Inside WSL there is usually no Linux browser; hand the URL to Windows,
+  // which reaches the WSL loopback through localhost forwarding / mirroring.
+  const inWsl = process.platform === 'linux' && typeof process.env.WSL_DISTRO_NAME === 'string';
   const [command, args] =
-    process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+    process.platform === 'win32' || inWsl
+      ? ['cmd.exe', ['/c', 'start', '', url]]
+      : process.platform === 'darwin'
+        ? ['open', [url]]
+        : ['xdg-open', [url]];
   try {
     const child = spawn(command, args, { stdio: 'ignore', detached: true });
     child.on('error', () => logger.warn?.(`cannot open a browser; visit ${url}`));
@@ -43,7 +50,8 @@ Options:
   -v, --version        Show the version
 
 Panel options:
-  --port <n>           Loopback port (default 7318)
+  --port <n>           Loopback port (default 7318; when it is busy the next
+                       free one is used, or a running panel is reused)
   --open               Open the page in the default browser
   --config, --ssh-config, --quiet as above
 `;
@@ -117,6 +125,14 @@ if (options.panel) {
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(1);
+  }
+  for (const { port, holder } of served.skipped) {
+    logger.warn?.(`port ${port} is taken by ${holder === 'other' ? 'another program' : `a different ${holder}`}; skipped`);
+  }
+  if (served.existing) {
+    process.stdout.write(`dsh-ssh-mcp panel: already running at ${served.url}\n`);
+    if (options.open) openBrowser(served.url, logger);
+    process.exit(0);
   }
   process.stdout.write(`dsh-ssh-mcp panel: ${served.url}\n`);
   if (options.open) openBrowser(served.url, logger);

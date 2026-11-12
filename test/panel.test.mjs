@@ -14,7 +14,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { isLoopbackHostHeader } from '../lib/http.js';
 import { callInstance, listInstances, TOKEN_HEADER } from '../mcp/control.js';
-import { createPanel } from '../mcp/panel.js';
+import { createPanel, probePanel, servePanel } from '../mcp/panel.js';
 import { createHiddenWatcher } from '../mcp/hidden-watch.js';
 
 let pass = 0;
@@ -251,6 +251,56 @@ const waitFor = async (predicate, ms = 5000) => {
   check('panel-never-writes-dsh-state', !existsSync(dshState), 'dsh state written');
   http.close();
   panel.dispose();
+}
+
+// ── Busy ports: reuse the same panel, skip anything else ──────────────────
+{
+  const options = { config: { sshConfigPath: sshConfig }, statePath, runDir };
+  const first = await servePanel({ ...options, port: 0 });
+  const port = Number(new URL(first.url).port);
+  check('serve-fresh', first.existing === false && port > 0, JSON.stringify({ url: first.url, existing: first.existing }));
+  const identity = await probePanel(port);
+  check('probe-identity', identity?.runDir === runDir && !JSON.stringify(identity).includes('token'), JSON.stringify(identity));
+
+  const again = await servePanel({ ...options, port });
+  check('reuse-same-panel', again.existing === true && again.url === first.url && again.server === undefined, JSON.stringify(again));
+
+  let otherHome = null;
+  try {
+    await servePanel({ ...options, runDir: join(dir, 'other-home', 'run'), port });
+  } catch (error) {
+    otherHome = error.message;
+  }
+  check('explicit-port-other-panel', /different panel/.test(otherHome ?? ''), String(otherHome));
+
+  const squatter = createServer((req, res) => res.end('not a panel'));
+  await new Promise((resolve) => squatter.listen(0, '127.0.0.1', resolve));
+  const squatted = squatter.address().port;
+  check('probe-non-panel', (await probePanel(squatted)) === null, 'squatter looked like a panel');
+  let busy = null;
+  try {
+    await servePanel({ ...options, port: squatted });
+  } catch (error) {
+    busy = error.message;
+  }
+  check('explicit-port-busy', /another program/.test(busy ?? ''), String(busy));
+
+  // Default range: the squatter holds the base port, so the next one is used.
+  const walked = await servePanel({ ...options, basePort: squatted });
+  check(
+    'default-walks-past-busy',
+    walked.existing === false && Number(new URL(walked.url).port) !== squatted && walked.skipped[0]?.port === squatted && walked.skipped[0]?.holder === 'other',
+    JSON.stringify({ url: walked.url, skipped: walked.skipped })
+  );
+  // Default range starting at the running panel: reused, not duplicated.
+  const reused = await servePanel({ ...options, basePort: port });
+  check('default-reuses-panel', reused.existing === true && reused.url === first.url, JSON.stringify(reused));
+
+  for (const served of [first, walked]) {
+    served.server.close();
+    served.panel.dispose();
+  }
+  squatter.close();
 }
 
 rmSync(dir, { recursive: true, force: true });
