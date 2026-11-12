@@ -15,7 +15,6 @@ import {
   age,
   diagnosticsCounters,
   esc,
-  MASKED_ADDRESS,
   hostState,
   renderBanners,
   renderDiagnostics,
@@ -91,8 +90,10 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
 {
   const dshHeader = renderHeader({ mode: 'dsh' });
   check('header-dsh', dshHeader.includes(TEXT.title) && dshHeader.includes('data-mask') && !dshHeader.includes('data-float') && !dshHeader.includes('data-close-panel'), dshHeader.slice(0, 200));
+  check('header-mask-off', /aria-pressed="false"[^>]*>.*?<span class="label">打码</.test(dshHeader) && dshHeader.includes('<path d="M2 12s3.5-6 10-6'), 'the off state shows the plain eye and 打码');
   const mcpHeader = renderHeader({ mode: 'mcp', busy: true, masked: true });
   check('header-mcp', mcpHeader.includes('title-tag') && /aria-pressed="true"/.test(mcpHeader) && /data-refresh disabled/.test(mcpHeader), mcpHeader.slice(0, 240));
+  check('header-mask-on', mcpHeader.includes(TEXT.maskOn) && mcpHeader.includes('<path d="M4 4l16 16"/>'), 'the on state shows eye-off and 已打码');
   check('tabs-for', tabsFor('dsh').join(',') === 'hosts,settings,diagnostics' && tabsFor('mcp').join(',') === 'hosts,processes,settings,diagnostics', JSON.stringify({ dsh: tabsFor('dsh'), mcp: tabsFor('mcp') }));
   const tabsDsh = renderTabs({ mode: 'dsh', tab: 'hosts', state: dsh });
   check('tabs-dsh', count(tabsDsh, 'role="tab"') === 3 && tabsDsh.includes('data-tab="diagnostics"') && !tabsDsh.includes('data-tab="processes"'), tabsDsh);
@@ -109,8 +110,9 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   check('card-identity', html.includes('data-alias="web"') && html.includes('data-alias="db"') && html.includes('class="badge prod"') && html.includes('class="badge muted"'), 'identity and badges');
   check('card-address', html.includes('root@192.0.2.10:22') && html.includes('deploy@192.0.2.11:2222'), 'address line');
   const masked = renderHosts({ ...dsh, settings: { ...settings, maskAddresses: true } }, { mode: 'dsh' });
-  check('card-address-masked', masked.includes(MASKED_ADDRESS) && !masked.includes('192.0.2.10') && !masked.includes('deploy@'), 'mask switch hides endpoints');
-  check('dialog-address-masked', renderEditDialog(web, { masked: true }).includes(MASKED_ADDRESS) && !renderEditDialog(web).includes(MASKED_ADDRESS), 'dialog follows the switch');
+  check('card-address-masked', masked.includes('class="mosaic"') && !masked.includes('192.0.2.10') && !masked.includes('deploy@'), 'mask switch hides endpoints behind a mosaic');
+  const maskedDialog = renderEditDialog(web, { masked: true });
+  check('dialog-address-masked', maskedDialog.includes('class="mosaic"') && !maskedDialog.includes('192.0.2.10') && !renderEditDialog(web).includes('mosaic'), 'dialog follows the switch');
   check('card-key', html.includes('id_web') && html.includes('—'), 'key names');
   check('card-host-key', html.includes('trusted · ssh-ed25519'), 'host key');
   check('card-status', html.includes('已连接 · 已连 1 小时 1 分 · 1 会话 · 3 命令'), 'status line');
@@ -234,7 +236,7 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   const { SshHelperPanel, STYLES } = await import('../ui/panel-element.js');
   check('element-defined-by-name', readFileSync(new URL('../ui/panel-element.js', import.meta.url), 'utf8').includes("customElements.define('ssh-helper-panel'"), 'the element must define itself');
   check('observed-attributes', SshHelperPanel.observedAttributes.join(',') === 'api-base,mode', JSON.stringify(SshHelperPanel.observedAttributes));
-  check('hosts-three-columns', STYLES.includes('minmax(280px,1fr)'), 'wide panels fit three cards per row');
+  check('hosts-fixed-width', STYLES.includes('flex:0 0 380px') && STYLES.includes('flex-wrap:wrap'), 'cards keep a fixed, wider width and wrap when space runs out');
   check('theme-pierces-shadow', STYLES.includes(':host') && STYLES.includes('--dsw-alias-bg-base') && STYLES.includes('prefers-color-scheme:dark') && STYLES.includes('container-type:inline-size'), 'theme hooks');
 
   const makePanel = (attrs = {}) => {

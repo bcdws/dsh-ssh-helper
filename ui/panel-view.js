@@ -67,8 +67,9 @@ export const TEXT = {
   groupConnection: '连接与空闲',
   groupPrivacy: '隐私与截图',
   maskAddresses: '地址打码',
-  maskAddressesDesc: '开启后卡片和编辑框里的地址（user@host:port）显示为 ***@***:***，截图时不用再手动打码；只影响显示，不影响连接。',
+  maskAddressesDesc: '开启后卡片和编辑框里的地址（user@host:port）显示为马赛克块，截图时不用再手动打码；只影响显示，不影响连接。',
   mask: '打码',
+  maskOn: '已打码',
   maskHint: '地址打码（只影响显示，不影响连接）',
   maskOnHint: '地址已打码；点击恢复显示',
   groupPolicy: '命令护栏',
@@ -135,6 +136,7 @@ const ICON_PATHS = {
   logo: ['M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z', 'M8 21h8', 'M12 17v4', 'M7 9.5l2 1.5-2 1.5', 'M12.5 12.5H16'],
   refresh: ['M20 12a8 8 0 1 1-2.3-5.6', 'M20 4v5h-5'],
   eye: ['M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z', 'M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z'],
+  eyeOff: ['M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z', 'M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z', 'M4 4l16 16'],
   chevron: ['M9 6l6 6-6 6'],
   power: ['M12 4v8', 'M7.5 6.6a7 7 0 1 0 9 0']
 };
@@ -153,7 +155,7 @@ const badge = (text, kind = '', title = '') => `<span class="badge ${kind}"${tit
 export function renderHeader({ mode, busy = false, masked = false }) {
   const actions = [
     `<button type="button" class="btn ghost" data-refresh ${busy ? 'disabled' : ''} title="${TEXT.refresh}">${icon('refresh')}<span class="label">${TEXT.refresh}</span></button>`,
-    `<button type="button" class="btn ghost${masked ? ' on' : ''}" data-mask aria-pressed="${masked ? 'true' : 'false'}" title="${masked ? TEXT.maskOnHint : TEXT.maskHint}">${icon('eye')}<span class="label">${TEXT.mask}</span></button>`,
+    `<button type="button" class="btn ghost${masked ? ' on' : ''}" data-mask aria-pressed="${masked ? 'true' : 'false'}" title="${masked ? TEXT.maskOnHint : TEXT.maskHint}">${icon(masked ? 'eyeOff' : 'eye')}<span class="label">${masked ? TEXT.maskOn : TEXT.mask}</span></button>`,
     `<button type="button" class="btn ghost danger" data-close-all title="${TEXT.closeAll}">${icon('power')}<span class="label">${TEXT.closeAll}</span></button>`
   ].join('');
   return `<header class="top">
@@ -235,10 +237,19 @@ function processRows(host, state) {
 
 const field = (label, value) => `<div class="kv"><span class="k">${esc(label)}</span><span class="v">${value}</span></div>`;
 
-/** What the address fact shows: the real endpoint, or a screenshot-safe placeholder. */
-export const MASKED_ADDRESS = '***@***:***';
-export function addressText(host, masked = false) {
-  return masked ? MASKED_ADDRESS : `${host.user ?? ''}@${host.host}:${host.port}`;
+/** The endpoint as text; the masked view never puts it in the DOM at all. */
+export function addressText(host) {
+  return `${host.user ?? ''}@${host.host}:${host.port}`;
+}
+
+/**
+ * A screenshot-safe mosaic block sized like the endpoint it replaces. The real
+ * address is only used for the width and is never emitted, so neither a
+ * screenshot nor inspecting the DOM reveals it.
+ */
+export function mosaicHtml(host) {
+  const characters = Math.max(5, Math.min(22, addressText(host).length));
+  return `<span class="mosaic" role="img" aria-label="${esc(TEXT.maskOn)}" style="width:${(characters * 0.55).toFixed(2)}em"></span>`;
 }
 
 /**
@@ -271,7 +282,7 @@ export function renderHostCard(host, { state, mode }) {
     <div class="host-actions">${primaryAction(host, state, mode)}${editable ? `<button type="button" class="btn sm ghost" data-edit="${alias}">${TEXT.editShort}</button>` : ''}</div>
   </header>
   <div class="facts">
-    ${field(TEXT.address, esc(addressText(host, masked)))}
+    ${field(TEXT.address, masked ? mosaicHtml(host) : esc(addressText(host)))}
     ${field(TEXT.key, esc(host.keyName ?? '—'))}
     ${editable ? '' : field(TEXT.source, TEXT.sourceConfig)}
     ${host.hostKey ? field(TEXT.hostKey, `${esc(host.hostKey.status)}${host.hostKey.type ? ` · ${esc(host.hostKey.type)}` : ''}`) : ''}
@@ -435,7 +446,7 @@ export function renderEditDialog(host, { error = null, saving = false, masked = 
   <form class="dialog" role="dialog" aria-modal="true" aria-label="${TEXT.editDialog}">
     <div class="dialog-title">${TEXT.editDialog}</div>
     <div class="dialog-desc">${TEXT.editDialogDesc}</div>
-    <div class="dialog-host">${esc(addressText(host, masked))}</div>
+    <div class="dialog-host">${masked ? mosaicHtml(host) : esc(addressText(host))}</div>
     <label class="field"><span>${TEXT.hostNameLabel}</span><input class="text" name="alias" value="${esc(host.alias)}" autocomplete="off" spellcheck="false" ${saving ? 'disabled' : ''}></label>
     <label class="field"><span>${TEXT.keyNameLabel}</span><input class="text" name="key" value="${esc(host.keyName ?? '—')}" autocomplete="off" spellcheck="false" ${keyEditable && !saving ? '' : 'disabled'}></label>
     <div class="dialog-desc">${TEXT.editDialogWarning}</div>

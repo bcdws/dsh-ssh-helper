@@ -1,11 +1,12 @@
 name: ci
 
 # What this guards:
-#  - the offline test suites, on every supported Node and on Windows;
+#  - the offline test suites, on the supported Node versions (22 and 24);
 #  - the committed vendor/ssh2.cjs is exactly what `npm run build:vendor`
 #    produces, so a bumped ssh2 can never ship a stale bundle;
 #  - the packed tarball really installs with zero dependencies and answers
-#    `initialize` fast enough for desktop MCP clients (about 30 s).
+#    `initialize` fast enough for desktop MCP clients (about 30 s), on Linux
+#    and Windows.
 #
 # What it automates:
 #  - main → stable: once every job is green on a push to main, the `stable`
@@ -37,13 +38,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, node: 18 }
-          - { os: ubuntu-latest, node: 20 }
           - { os: ubuntu-latest, node: 22 }
-          - { os: windows-latest, node: 20 }
+          - { os: ubuntu-latest, node: 24 }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -58,10 +57,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
 
@@ -82,7 +81,7 @@ jobs:
         run: npm pack
 
       - if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: dsh-ssh-helper-tarball
           path: '*.tgz'
@@ -96,7 +95,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       # No --force: if a newer run already promoted a later commit, this push
@@ -111,10 +110,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm pack
