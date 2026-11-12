@@ -15,6 +15,7 @@ import {
   age,
   diagnosticsCounters,
   esc,
+  MASKED_ADDRESS,
   hostState,
   renderBanners,
   renderDiagnostics,
@@ -51,7 +52,7 @@ const db = {
   lastFailure: { tool: 'ssh_run', code: 'connect_timeout', message: 'handshake timed out', ageSeconds: 12 },
   callFailures: 2, lastCommand: null, lastCommandAgeSeconds: null, instances: []
 };
-const settings = { idleTimeoutMs: 0, sshVisible: true, maxOutputBytes: 32768, transferTimeoutMs: 600000, logAnalysis: false };
+const settings = { idleTimeoutMs: 0, sshVisible: true, maxOutputBytes: 32768, transferTimeoutMs: 600000, logAnalysis: false, maskAddresses: false };
 const dsh = {
   hosts: [web, db],
   settings,
@@ -88,10 +89,10 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
 
 // ── header and tabs ────────────────────────────────────────────────────────
 {
-  const dshHeader = renderHeader({ mode: 'dsh', floatable: true });
-  check('header-dsh', dshHeader.includes(TEXT.title) && dshHeader.includes('data-float') && !dshHeader.includes('data-close-panel'), dshHeader.slice(0, 200));
-  const mcpHeader = renderHeader({ mode: 'mcp', closable: true, busy: true });
-  check('header-mcp', mcpHeader.includes('title-tag') && mcpHeader.includes('data-close-panel') && /data-refresh disabled/.test(mcpHeader), mcpHeader.slice(0, 240));
+  const dshHeader = renderHeader({ mode: 'dsh' });
+  check('header-dsh', dshHeader.includes(TEXT.title) && dshHeader.includes('data-mask') && !dshHeader.includes('data-float') && !dshHeader.includes('data-close-panel'), dshHeader.slice(0, 200));
+  const mcpHeader = renderHeader({ mode: 'mcp', busy: true, masked: true });
+  check('header-mcp', mcpHeader.includes('title-tag') && /aria-pressed="true"/.test(mcpHeader) && /data-refresh disabled/.test(mcpHeader), mcpHeader.slice(0, 240));
   check('tabs-for', tabsFor('dsh').join(',') === 'hosts,settings,diagnostics' && tabsFor('mcp').join(',') === 'hosts,processes,settings,diagnostics', JSON.stringify({ dsh: tabsFor('dsh'), mcp: tabsFor('mcp') }));
   const tabsDsh = renderTabs({ mode: 'dsh', tab: 'hosts', state: dsh });
   check('tabs-dsh', count(tabsDsh, 'role="tab"') === 3 && tabsDsh.includes('data-tab="diagnostics"') && !tabsDsh.includes('data-tab="processes"'), tabsDsh);
@@ -107,6 +108,9 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   check('no-side-panel', !html.includes('drawer') && !html.includes('data-select="') && !html.includes('class="row"'), 'the list must not open a side panel');
   check('card-identity', html.includes('data-alias="web"') && html.includes('data-alias="db"') && html.includes('class="badge prod"') && html.includes('class="badge muted"'), 'identity and badges');
   check('card-address', html.includes('root@192.0.2.10:22') && html.includes('deploy@192.0.2.11:2222'), 'address line');
+  const masked = renderHosts({ ...dsh, settings: { ...settings, maskAddresses: true } }, { mode: 'dsh' });
+  check('card-address-masked', masked.includes(MASKED_ADDRESS) && !masked.includes('192.0.2.10') && !masked.includes('deploy@'), 'mask switch hides endpoints');
+  check('dialog-address-masked', renderEditDialog(web, { masked: true }).includes(MASKED_ADDRESS) && !renderEditDialog(web).includes(MASKED_ADDRESS), 'dialog follows the switch');
   check('card-key', html.includes('id_web') && html.includes('—'), 'key names');
   check('card-host-key', html.includes('trusted · ssh-ed25519'), 'host key');
   check('card-status', html.includes('已连接 · 已连 1 小时 1 分 · 1 会话 · 3 命令'), 'status line');
@@ -171,7 +175,8 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   check('settings-analysis', dshHtml.includes(TEXT.logAnalysis) && dshHtml.includes('not configured'), 'analysis availability');
   check('settings-policy', dshHtml.includes(TEXT.policyText) && dshHtml.includes('journalctl'), 'policy prose');
   check('settings-panel-foot', dshHtml.includes('/home/u/.dsh-ssh-mcp/state.json') && dshHtml.includes('示例警告'), 'state path and warnings');
-  check('settings-groups', count(dshHtml, 'group-title') === 3, `${count(dshHtml, 'group-title')} groups`);
+  check('settings-mask', dshHtml.includes('data-setting-toggle="maskAddresses"') && mcpHtml.includes('data-setting-toggle="maskAddresses"'), 'mask switch on both surfaces');
+  check('settings-groups', count(dshHtml, 'group-title') === 4, `${count(dshHtml, 'group-title')} groups`);
   const withPolicy = renderSettings({ settings: { ...settings, hostKeyPolicy: 'warn' } }, { mode: 'mcp' });
   check('settings-host-key-label', withPolicy.includes('<code>仅提醒（记录并继续）</code>'), withPolicy.slice(withPolicy.indexOf('主机密钥'), withPolicy.indexOf('主机密钥') + 200));
 }
@@ -209,7 +214,7 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
 // ── no raw dictionary key or JS value leaks into rendered text ─────────────
 {
   const html = [
-    renderHeader({ mode: 'mcp', floatable: true, closable: true }),
+    renderHeader({ mode: 'mcp', masked: true }),
     ...['hosts', 'processes', 'settings', 'diagnostics'].map((tab) => renderTab(tab, mcp, { mode: 'mcp' })),
     renderHostCard(web, { state: mcp, mode: 'mcp' }),
     renderEditDialog(web),
@@ -228,7 +233,8 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   globalThis.customElements = { get: () => undefined, define: () => {} };
   const { SshHelperPanel, STYLES } = await import('../ui/panel-element.js');
   check('element-defined-by-name', readFileSync(new URL('../ui/panel-element.js', import.meta.url), 'utf8').includes("customElements.define('ssh-helper-panel'"), 'the element must define itself');
-  check('observed-attributes', SshHelperPanel.observedAttributes.join(',') === 'api-base,mode,floatable,closable', JSON.stringify(SshHelperPanel.observedAttributes));
+  check('observed-attributes', SshHelperPanel.observedAttributes.join(',') === 'api-base,mode', JSON.stringify(SshHelperPanel.observedAttributes));
+  check('hosts-three-columns', STYLES.includes('minmax(280px,1fr)'), 'wide panels fit three cards per row');
   check('theme-pierces-shadow', STYLES.includes(':host') && STYLES.includes('--dsw-alias-bg-base') && STYLES.includes('prefers-color-scheme:dark') && STYLES.includes('container-type:inline-size'), 'theme hooks');
 
   const makePanel = (attrs = {}) => {
@@ -323,7 +329,7 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
     slots: { inject: (_name, callback) => callback(), register: (definition, component) => (slots.push({ definition, component }), () => {}) }
   };
   module.apply(ctx);
-  check('client-slots', slots.length === 3 && slots.some((entry) => entry.definition.name === 'sidebar.panellist' && entry.definition.id === 'ssh-assistant') && slots.some((entry) => entry.definition.name === 'main' && entry.definition.key === 'ssh-assistant') && slots.some((entry) => entry.definition.name === 'shell.overlay'), JSON.stringify(slots.map((entry) => entry.definition)));
+  check('client-slots', slots.length === 2 && slots.some((entry) => entry.definition.name === 'sidebar.panellist' && entry.definition.id === 'ssh-assistant') && slots.some((entry) => entry.definition.name === 'main' && entry.definition.key === 'ssh-assistant') && !slots.some((entry) => entry.definition.name === 'shell.overlay'), JSON.stringify(slots.map((entry) => entry.definition)));
   const panel = slots.find((entry) => entry.definition.name === 'main');
   const expand = (node) => {
     if (node === null || typeof node !== 'object') return node;
@@ -334,7 +340,7 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   const tree = expand(panel.component());
   check('client-mount', tree?.props?.className === 'ssh-mount', JSON.stringify(tree?.props));
   const source = readFileSync(new URL('../client.js', import.meta.url), 'utf8');
-  check('client-mounts-element', source.includes("element.setAttribute('api-base', '/ssh-pool')") && source.includes("element.setAttribute('mode', 'dsh')") && source.includes('ssh-helper-float') && source.includes('ssh-helper-close'), 'host wiring');
+  check('client-mounts-element', source.includes("element.setAttribute('api-base', '/ssh-pool')") && source.includes("element.setAttribute('mode', 'dsh')") && !source.includes('ssh-helper-float') && !source.includes('shell.overlay'), 'host wiring, no floating window');
   check('client-loads-shared-ui', source.includes("const ELEMENT_URL = '/ssh-pool/ui/panel-element.js'") && source.includes('globalThis.__DSH_SSH_ASSISTANT__?.token'), 'shared UI + token');
   check('client-has-no-css', !/STYLES|\.ssh-setrow\{|createElement\('style'/.test(source), 'the styles moved into the shared element');
 }

@@ -14,8 +14,7 @@
  *   data-tab, data-action (+ data-alias, data-pid), data-toggle
  *   (+ data-alias, data-field), data-setting-toggle, data-meta-input
  *   (+ data-alias, data-field), data-setting-input (+ data-scale), data-edit,
- *   data-float, data-close-panel, data-refresh, data-close-all, dialog:
- *   data-dialog-cancel / form submit.
+ *   data-refresh, data-close-all, dialog: data-dialog-cancel / form submit.
  *
  * @module dsh-ssh-helper/ui/panel-view
  */
@@ -26,8 +25,6 @@ export const TEXT = {
   subtitleMcp: '本机所有 dsh-ssh-mcp 进程与连接',
   tabs: { hosts: '主机', processes: '进程', settings: '设置', diagnostics: '诊断' },
   refresh: '刷新',
-  float: '浮窗',
-  close: '关闭',
   closeAll: '全部断开',
   open: '连接',
   disconnect: '断开',
@@ -40,10 +37,10 @@ export const TEXT = {
   sessions: '会话',
   commands: '命令',
   noHosts: '没有可用的 SSH 主机：检查 ~/.ssh/config 或插件配置。',
-  hostsNoteDsh: '「隐藏」后任何会话都看不到、也连不上它，当前连接会立即断开；每台主机的详情和开关都在卡片上。',
-  hostsNoteMcp: '「隐藏」后任何 MCP 会话都看不到、也连不上它，各进程约 1 秒内断开现有连接；每台主机的详情、开关和各进程连接都在卡片上。',
+  hostsNoteDsh: '「隐藏」后任何会话都看不到、也连不上它，现有连接会在 20 秒后自动断开；每台主机的详情和开关都在卡片上。',
+  hostsNoteMcp: '「隐藏」后任何 MCP 会话都看不到、也连不上它，各进程的现有连接会在 20 秒后自动断开；每台主机的详情、开关和各进程连接都在卡片上。',
   prodHint: '生产服务器（实际业务在跑）。不拦截命令；agent 在 ssh_hosts 和每次改动类调用的结果里都会看到 [PROD] 提醒，先说明影响、取得你的确认再重启、删除或改配置/数据。',
-  hiddenHint: '隐藏后 agent 看不到也连不上该主机，现有连接会被断开；这里仍可管理。',
+  hiddenHint: '隐藏后 agent 看不到也连不上该主机；现有连接会在 20 秒后自动断开，期间恢复可见则不会断开；这里仍可管理。',
   idleOverride: '空闲超时',
   idleOverrideDesc: '秒；留空跟随全局设置，0 = 永不断开。',
   remark: '备注',
@@ -68,6 +65,12 @@ export const TEXT = {
   sshVisibleDesc: '总开关。关闭后 8 个 ssh_* 工具对任何会话（含子 agent）都不再存在，已建立的连接不受影响。',
   groupOutput: '输出与上下文',
   groupConnection: '连接与空闲',
+  groupPrivacy: '隐私与截图',
+  maskAddresses: '地址打码',
+  maskAddressesDesc: '开启后卡片和编辑框里的地址（user@host:port）显示为 ***@***:***，截图时不用再手动打码；只影响显示，不影响连接。',
+  mask: '打码',
+  maskHint: '地址打码（只影响显示，不影响连接）',
+  maskOnHint: '地址已打码；点击恢复显示',
   groupPolicy: '命令护栏',
   maxOutputBytes: '命令输出上限',
   maxOutputBytesDesc: '每条命令回传的每个流（stdout / stderr）的字节上限，单位 KB；默认 32 KB，超出时保留头尾并标注省略。调小更省上下文。',
@@ -131,8 +134,7 @@ export function hostState(host) {
 const ICON_PATHS = {
   logo: ['M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z', 'M8 21h8', 'M12 17v4', 'M7 9.5l2 1.5-2 1.5', 'M12.5 12.5H16'],
   refresh: ['M20 12a8 8 0 1 1-2.3-5.6', 'M20 4v5h-5'],
-  float: ['M14 4h6v6', 'M20 4l-8 8', 'M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4'],
-  close: ['M6 6l12 12', 'M18 6L6 18'],
+  eye: ['M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z', 'M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z'],
   chevron: ['M9 6l6 6-6 6'],
   power: ['M12 4v8', 'M7.5 6.6a7 7 0 1 0 9 0']
 };
@@ -148,12 +150,11 @@ const badge = (text, kind = '', title = '') => `<span class="badge ${kind}"${tit
 
 // ── header & tabs ───────────────────────────────────────────────────────────
 
-export function renderHeader({ mode, floatable = false, closable = false, busy = false }) {
+export function renderHeader({ mode, busy = false, masked = false }) {
   const actions = [
     `<button type="button" class="btn ghost" data-refresh ${busy ? 'disabled' : ''} title="${TEXT.refresh}">${icon('refresh')}<span class="label">${TEXT.refresh}</span></button>`,
-    `<button type="button" class="btn ghost danger" data-close-all title="${TEXT.closeAll}">${icon('power')}<span class="label">${TEXT.closeAll}</span></button>`,
-    floatable ? `<button type="button" class="btn ghost" data-float title="${TEXT.float}">${icon('float')}<span class="label">${TEXT.float}</span></button>` : '',
-    closable ? `<button type="button" class="btn" data-close-panel title="${TEXT.close}">${icon('close')}<span class="label">${TEXT.close}</span></button>` : ''
+    `<button type="button" class="btn ghost${masked ? ' on' : ''}" data-mask aria-pressed="${masked ? 'true' : 'false'}" title="${masked ? TEXT.maskOnHint : TEXT.maskHint}">${icon('eye')}<span class="label">${TEXT.mask}</span></button>`,
+    `<button type="button" class="btn ghost danger" data-close-all title="${TEXT.closeAll}">${icon('power')}<span class="label">${TEXT.closeAll}</span></button>`
   ].join('');
   return `<header class="top">
   <span class="mark">${icon('logo', 16)}</span>
@@ -234,6 +235,12 @@ function processRows(host, state) {
 
 const field = (label, value) => `<div class="kv"><span class="k">${esc(label)}</span><span class="v">${value}</span></div>`;
 
+/** What the address fact shows: the real endpoint, or a screenshot-safe placeholder. */
+export const MASKED_ADDRESS = '***@***:***';
+export function addressText(host, masked = false) {
+  return masked ? MASKED_ADDRESS : `${host.user ?? ''}@${host.host}:${host.port}`;
+}
+
 /**
  * One host as a self-contained card: identity, address and key, status,
  * counters, the two switches and the per-host overrides, failures, the last
@@ -243,6 +250,7 @@ const field = (label, value) => `<div class="kv"><span class="k">${esc(label)}</
 export function renderHostCard(host, { state, mode }) {
   const { key } = hostState(host);
   const alias = esc(host.alias);
+  const masked = state?.settings?.maskAddresses === true;
   const editable = host.source === 'ssh-config';
   const idle = host.idleTimeoutMs === null || host.idleTimeoutMs === undefined ? '' : String(Math.round(host.idleTimeoutMs / 1000));
   const effective = Math.round((host.effectiveIdleTimeoutMs ?? 0) / 1000);
@@ -263,7 +271,7 @@ export function renderHostCard(host, { state, mode }) {
     <div class="host-actions">${primaryAction(host, state, mode)}${editable ? `<button type="button" class="btn sm ghost" data-edit="${alias}">${TEXT.editShort}</button>` : ''}</div>
   </header>
   <div class="facts">
-    ${field(TEXT.address, `${esc(host.user ?? '')}@${esc(host.host)}:${esc(host.port)}`)}
+    ${field(TEXT.address, esc(addressText(host, masked)))}
     ${field(TEXT.key, esc(host.keyName ?? '—'))}
     ${editable ? '' : field(TEXT.source, TEXT.sourceConfig)}
     ${host.hostKey ? field(TEXT.hostKey, `${esc(host.hostKey.status)}${host.hostKey.type ? ` · ${esc(host.hostKey.type)}` : ''}`) : ''}
@@ -356,6 +364,9 @@ export function renderSettings(state, { mode }) {
     ${setRow(TEXT.transferTimeout, TEXT.transferTimeoutDesc, numberInput('transferTimeoutMs', Math.round((s.transferTimeoutMs ?? 600000) / 1000), 1000, 'min="5" max="7200"'))}
     ${s.hostKeyPolicy ? setRow(TEXT.hostKeyPolicy, TEXT.hostKeyPolicyDesc, `<code>${esc(HOST_KEY_LABELS[s.hostKeyPolicy] ?? s.hostKeyPolicy)}</code>`) : ''}
   </div></div>
+  <div class="group"><div class="group-title">${TEXT.groupPrivacy}</div><div class="card">
+    ${setRow(TEXT.maskAddresses, TEXT.maskAddressesDesc, switchHtml({ checked: s.maskAddresses === true, label: TEXT.maskAddresses, attrs: 'data-setting-toggle="maskAddresses"' }))}
+  </div></div>
   <div class="group"><div class="group-title">${TEXT.groupPolicy}</div><div class="card prose">
     <p>${TEXT.policyText}</p>
     <div class="set-title">${TEXT.logExamples}</div>
@@ -417,14 +428,14 @@ export function renderDiagnostics(state, { mode }) {
 
 // ── dialog, banners, footer ─────────────────────────────────────────────────
 
-export function renderEditDialog(host, { error = null, saving = false } = {}) {
+export function renderEditDialog(host, { error = null, saving = false, masked = false } = {}) {
   if (!host) return '';
   const keyEditable = typeof host.keyName === 'string' && host.keyName.length > 0 && !host.keyName.startsWith('agent:');
   return `<div class="backdrop" data-dialog-backdrop>
   <form class="dialog" role="dialog" aria-modal="true" aria-label="${TEXT.editDialog}">
     <div class="dialog-title">${TEXT.editDialog}</div>
     <div class="dialog-desc">${TEXT.editDialogDesc}</div>
-    <div class="dialog-host">${esc(host.user ?? '')}@${esc(host.host)}:${esc(host.port)}</div>
+    <div class="dialog-host">${esc(addressText(host, masked))}</div>
     <label class="field"><span>${TEXT.hostNameLabel}</span><input class="text" name="alias" value="${esc(host.alias)}" autocomplete="off" spellcheck="false" ${saving ? 'disabled' : ''}></label>
     <label class="field"><span>${TEXT.keyNameLabel}</span><input class="text" name="key" value="${esc(host.keyName ?? '—')}" autocomplete="off" spellcheck="false" ${keyEditable && !saving ? '' : 'disabled'}></label>
     <div class="dialog-desc">${TEXT.editDialogWarning}</div>

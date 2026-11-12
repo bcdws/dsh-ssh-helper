@@ -50,7 +50,7 @@ const pool = {
   closeAll: () => calls.push('closeAll')
 };
 /** The retained settings the panel still exposes (sshVisible is the safety master switch). */
-const settings = { idleTimeoutMs: 0, maxOutputBytes: 32768, transferTimeoutMs: 600000, sshVisible: true, logAnalysis: false };
+const settings = { idleTimeoutMs: 0, maxOutputBytes: 32768, transferTimeoutMs: 600000, sshVisible: true, logAnalysis: false, maskAddresses: false };
 /** Keys removed in the slimming: they must never come back through the API. */
 const DELETED_SETTINGS = ['timeoutMultiplier', 'timeoutFloorMs', 'timeoutCeilingMs', 'maxLogLines', 'blockResourceSpikes', 'productionEnforced'];
 const settingsPatches = [];
@@ -82,6 +82,8 @@ const api = createAssistantApi({
     return { counters: { toolCalls: 0 }, events: [] };
   },
   onSettingsChanged: () => settingsNotices.push(Date.now()),
+  // Close immediately in the test; production keeps the 20 s grace period.
+  hiddenCloseDelayMs: 0,
   refreshHosts: () => { hostRefreshes += 1; },
   renameKey: async ({ alias, keyName }) => {
     renamed = { alias, keyName };
@@ -179,7 +181,7 @@ check('state-has-no-policy', state.payload.state.hosts.every((host) => host.poli
 check('state-has-no-activity-trail', state.payload.state.activity === undefined, JSON.stringify(state.payload.state.activity));
 check('state-has-commands-total', state.payload.state.totals.commands === 0, JSON.stringify(state.payload.state.totals));
 check('state-has-hidden', state.payload.state.hosts[0].hidden === false && state.payload.state.hosts[1].hidden === true, JSON.stringify(state.payload.state.hosts.map((host) => host.hidden)));
-check('state-settings-shape', Object.keys(state.payload.state.settings).filter((key) => key !== 'hostKeyPolicy').sort().join(',') === 'idleTimeoutMs,logAnalysis,maxOutputBytes,sshVisible,transferTimeoutMs', JSON.stringify(state.payload.state.settings));
+check('state-settings-shape', Object.keys(state.payload.state.settings).filter((key) => key !== 'hostKeyPolicy').sort().join(',') === 'idleTimeoutMs,logAnalysis,maskAddresses,maxOutputBytes,sshVisible,transferTimeoutMs', JSON.stringify(state.payload.state.settings));
 check('state-settings-no-deleted-keys', DELETED_SETTINGS.every((key) => !(key in state.payload.state.settings)), JSON.stringify(state.payload.state.settings));
 check('read-issues-cookie', /dsh_ssh_pool_token=[0-9a-f]{48}/.test(state.cookie ?? ''), String(state.cookie));
 check('cookie-is-scoped', /Path=\/ssh-pool/.test(state.cookie ?? '') && /HttpOnly/.test(state.cookie ?? '') && /SameSite=Strict/.test(state.cookie ?? ''), String(state.cookie));
@@ -226,7 +228,7 @@ check('hide-during-connect-closes-again', hideDuringConnect.status === 200 && cl
 const settingsCall = await call({ method: 'POST', url: '/ssh-pool/settings', headers: authorized, body: { idleTimeoutMs: 30000, maxOutputBytes: 32768 } });
 check('post-settings', settingsCall.status === 200 && settings.idleTimeoutMs === 30000 && settings.maxOutputBytes === 32768, JSON.stringify(settings));
 check('post-settings-patch-is-retained-only', settingsPatches.length === 1 && Object.keys(settingsPatches[0]).sort().join(',') === 'idleTimeoutMs,maxOutputBytes', JSON.stringify(settingsPatches));
-check('post-settings-response-shape', Object.keys(settingsCall.payload.state.settings).filter((key) => key !== 'hostKeyPolicy').sort().join(',') === 'idleTimeoutMs,logAnalysis,maxOutputBytes,sshVisible,transferTimeoutMs', JSON.stringify(settingsCall.payload.state.settings));
+check('post-settings-response-shape', Object.keys(settingsCall.payload.state.settings).filter((key) => key !== 'hostKeyPolicy').sort().join(',') === 'idleTimeoutMs,logAnalysis,maskAddresses,maxOutputBytes,sshVisible,transferTimeoutMs', JSON.stringify(settingsCall.payload.state.settings));
 check('settings-notified', settingsNotices.length >= 1, `${settingsNotices.length} notifications`);
 
 // The safety master switch travels through the API like any retained setting.

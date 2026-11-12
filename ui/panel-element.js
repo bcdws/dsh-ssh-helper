@@ -2,15 +2,13 @@
  * `<ssh-helper-panel>` — the one SSH assistant UI, as a dependency-free custom
  * element with its own shadow DOM.
  *
- *   <ssh-helper-panel api-base="/ssh-pool" mode="dsh" floatable></ssh-helper-panel>   DSH sidebar
- *   <ssh-helper-panel api-base="/api" mode="mcp"></ssh-helper-panel>                  MCP page
+ *   <ssh-helper-panel api-base="/ssh-pool" mode="dsh"></ssh-helper-panel>   DSH sidebar
+ *   <ssh-helper-panel api-base="/api" mode="mcp"></ssh-helper-panel>      MCP page
  *
  * Attributes: `api-base` (route prefix of `lib/assistant-api.js`), `mode`
  * (`dsh` shows the sshVisible master switch; `mcp` adds the process tab and
- * routes opens to a chosen server), `floatable` / `closable` (header buttons
- * that dispatch `ssh-helper-float` / `ssh-helper-close`, composed events the
- * host page handles). Property `token`: an initial write credential (DSH
- * injects one); every state read refreshes it anyway.
+ * routes opens to a chosen server). Property `token`: an initial write
+ * credential (DSH injects one); every state read refreshes it anyway.
  *
  * Theme: DSH's `--dsw-alias-*` variables pierce the shadow root, so inside DSH
  * the panel uses the host theme; standalone it falls back to its own light /
@@ -96,6 +94,7 @@ button,input{font:inherit;color:inherit}
 .btn.primary{background:var(--brand);border-color:transparent;color:var(--bg)}
 .btn.primary:hover{filter:brightness(1.08);background:var(--brand)}
 .btn.ghost{background:transparent;border-color:transparent;color:var(--fg2)}
+.btn.ghost.on{color:var(--brand);background:var(--l2)}
 .btn.ghost:hover{background:var(--l2);color:var(--fg)}
 .btn.danger{color:var(--err)}
 .btn.icon{width:30px;padding:0}
@@ -115,7 +114,7 @@ button,input{font:inherit;color:inherit}
 .num:focus,.text:focus{outline:none;border-color:var(--brand)}
 .field{display:flex;flex-direction:column;gap:6px}
 .field>span{font-size:12px;color:var(--fg2);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
-.hosts{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:12px;align-items:start}
+.hosts{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;align-items:start}
 .host{display:flex;flex-direction:column;gap:10px;padding:14px 16px;border:1px solid var(--b1);border-radius:12px;background:var(--l1);min-width:0}
 .host-head{display:flex;align-items:center;gap:10px}
 .host-id{display:flex;align-items:center;gap:6px;flex:1;min-width:0}
@@ -198,7 +197,7 @@ const POLL_MS = 4000;
 
 class SshHelperPanel extends HTMLElement {
   static get observedAttributes() {
-    return ['api-base', 'mode', 'floatable', 'closable'];
+    return ['api-base', 'mode'];
   }
 
   constructor() {
@@ -308,7 +307,7 @@ class SshHelperPanel extends HTMLElement {
 
   setBusy(value) {
     this.busy = value;
-    for (const element of this.shadowRoot.querySelectorAll('[data-action],[data-refresh]')) element.toggleAttribute('disabled', value);
+    for (const element of this.shadowRoot.querySelectorAll('[data-action],[data-refresh],[data-mask]')) element.toggleAttribute('disabled', value);
   }
 
   // ── rendering ───────────────────────────────────────────────────────────
@@ -325,12 +324,12 @@ class SshHelperPanel extends HTMLElement {
     if (!tabsFor(this.mode).includes(this.tab)) this.tab = 'hosts';
     const bodyScroll = this.shadowRoot.querySelector('.body')?.scrollTop ?? 0;
     this.frame.innerHTML = [
-      renderHeader({ mode: this.mode, floatable: this.hasAttribute('floatable'), closable: this.hasAttribute('closable'), busy: this.busy }),
+      renderHeader({ mode: this.mode, busy: this.busy, masked: this.state?.settings?.maskAddresses === true }),
       renderTabs({ mode: this.mode, tab: this.tab, state: this.state }),
       renderBanners({ error: this.error, notice: this.notice }),
       `<div class="body">${this.state === null ? `<div class="loading">${this.error ? '' : TEXT.loading}</div>` : renderTab(this.tab, this.state, options)}</div>`,
       renderFooter(this.state, { mode: this.mode }),
-      this.dialog ? renderEditDialog(this.dialog.host, this.dialog) : ''
+      this.dialog ? renderEditDialog(this.dialog.host, { ...this.dialog, masked: this.state?.settings?.maskAddresses === true }) : ''
     ].join('');
     const body = this.shadowRoot.querySelector('.body');
     if (body) body.scrollTop = bodyScroll;
@@ -340,10 +339,6 @@ class SshHelperPanel extends HTMLElement {
 
   hostByAlias(alias) {
     return (this.state?.hosts ?? []).find((host) => host.alias === alias);
-  }
-
-  emit(name) {
-    this.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true }));
   }
 
   wire() {
@@ -360,9 +355,9 @@ class SshHelperPanel extends HTMLElement {
       } else if (d.refresh !== undefined) void this.load(false);
       else if (d.closeAll !== undefined) {
         if (window.confirm(TEXT.confirmCloseAll)) void this.post('action', { action: 'close_all' });
-      } else if (d.float !== undefined) this.emit('ssh-helper-float');
-      else if (d.closePanel !== undefined) this.emit('ssh-helper-close');
-      else if (d.action !== undefined) {
+      } else if (d.mask !== undefined) {
+        void this.post('settings', { maskAddresses: this.state?.settings?.maskAddresses !== true });
+      } else if (d.action !== undefined) {
         event.stopPropagation();
         const body = { action: d.action, ...(d.alias ? { alias: d.alias } : {}), ...(d.pid ? { pid: Number(d.pid) } : {}) };
         void this.post('action', body);

@@ -37,7 +37,7 @@ DSH 通过 `link:` 指向仓库目录，所以运行的就是这个目录里的�
 ```
 lib/                     共享核心：连接池、策略、工具、面板 API（assistant-api.js）。不能引用 dsh/、ui/ 或 mcp/
 ui/                      共享面板界面：panel-view.js（纯 HTML 渲染）+ panel-element.js（<ssh-helper-panel>，shadow DOM）
-index.js  dsh/  client.js   DSH 适配层（client.js 只把 <ssh-helper-panel> 挂进 DSH 的侧边栏/浮窗）
+index.js  dsh/  client.js   DSH 适配层（client.js 只把 <ssh-helper-panel> 挂进 DSH 的侧边栏）
 mcp/      bin/              MCP 适配层（stdio server、控制口 control.js、面板 panel.js + panel.html 外壳）
 vendor/ssh2.cjs          预打包的 ssh2（构建产物，勿手改）
 scripts/build-vendor.mjs 重新生成 vendor/ 的脚本

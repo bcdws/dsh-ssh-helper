@@ -24,7 +24,7 @@ const SHAPE = 'alias,hidden,idleTimeoutMs,prod,remark';
 /** The only keys ever written for a host. */
 const STORED_KEYS = 'hidden,idleTimeoutMs,remark';
 /** The four settings the panel exposes, field names fixed by the contract. */
-const SETTINGS_SHAPE = 'idleTimeoutMs,logAnalysis,maxOutputBytes,sshVisible,transferTimeoutMs';
+const SETTINGS_SHAPE = 'idleTimeoutMs,logAnalysis,maskAddresses,maxOutputBytes,sshVisible,transferTimeoutMs';
 /** Removed in the single-guard slimming: never read back, accepted or persisted. */
 const LEGACY_HOST_KEYS = ['profile', 'caps', 'level', 'visible'];
 const DELETED_SETTINGS = ['timeoutMultiplier', 'timeoutFloorMs', 'timeoutCeilingMs', 'maxLogLines', 'blockResourceSpikes', 'productionEnforced'];
@@ -42,7 +42,7 @@ check('default-remark', fresh.remark === '' && fresh.idleTimeoutMs === null, JSO
 check('unknown-alias-same-shape', JSON.stringify(store.host('other')) === JSON.stringify({ ...fresh, alias: 'other' }), JSON.stringify(store.host('other')));
 check('legacy-keys-gone', LEGACY_HOST_KEYS.every((key) => !(key in fresh)), JSON.stringify(fresh));
 
-check('defaults-settings', store.settings().idleTimeoutMs === 5000 && store.settings().maxOutputBytes === 32000 && store.settings().transferTimeoutMs === 120000 && store.settings().sshVisible === true && store.settings().logAnalysis === false, JSON.stringify(store.settings()));
+check('defaults-settings', store.settings().idleTimeoutMs === 5000 && store.settings().maxOutputBytes === 32000 && store.settings().transferTimeoutMs === 120000 && store.settings().sshVisible === true && store.settings().logAnalysis === false && store.settings().maskAddresses === false, JSON.stringify(store.settings()));
 check('defaults-settings-shape', Object.keys(store.settings()).sort().join(',') === SETTINGS_SHAPE, Object.keys(store.settings()).join(','));
 check('no-file-yet', !existsSync(file), 'the store must not write before a change');
 
@@ -101,6 +101,7 @@ check('deleted-settings-never-returned', DELETED_SETTINGS.every((key) => !(key i
 // ── settings patches ────────────────────────────────────────────────────────
 const patched = migrated.setSettings({ idleTimeoutMs: 120000, maxOutputBytes: 32768, transferTimeoutMs: 90000, sshVisible: false, maxLogLines: 7 });
 check('settings-patch', patched.idleTimeoutMs === 120000 && patched.maxOutputBytes === 32768 && patched.transferTimeoutMs === 90000 && patched.sshVisible === false, JSON.stringify(patched));
+check('settings-mask-patch', migrated.setSettings({ maskAddresses: true }).maskAddresses === true && new MetadataStore({ filePath: legacyFile }).settings().maskAddresses === true, JSON.stringify(migrated.settings()));
 check('settings-deleted-key-ignored', !('maxLogLines' in patched), JSON.stringify(patched));
 check('settings-bad-value-kept', migrated.setSettings({ maxOutputBytes: 10 }).maxOutputBytes === 32768, JSON.stringify(migrated.settings()));
 check('settings-idle-bad-value-kept', migrated.setSettings({ idleTimeoutMs: -1 }).idleTimeoutMs === 120000, JSON.stringify(migrated.settings()));

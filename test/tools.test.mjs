@@ -18,6 +18,7 @@ const pool = {
   logger: undefined,
   has: (alias) => specs.has(alias),
   hostVisible: (alias) => !hidden.has(alias),
+  hostMeta: (alias) => ({ remark: alias === 'open-host' ? '生产主库，先确认' : '', hidden: hidden.has(alias), prod: false, idleTimeoutMs: null }),
   // Live deadline policy (the assistant settings), distinct from the config.
   timeoutPolicy: () => ({ multiplier: 2.5, floorMs: 1000, ceilingMs: 3600000, fallbackEstimateMs: 4000 }),
   // The panel's activity trail: every model-facing operation lands here.
@@ -62,6 +63,8 @@ check('listed-visible-only', listed.hosts.length === 1 && listed.hosts[0].alias 
 check('hidden-flag-exposed', listed.hosts[0].hidden === false, JSON.stringify(listed.hosts[0]));
 const ran = await byName.get('ssh_run').execute({ host: 'open-host', command: 'echo hi' }, {});
 check('visible-run-works', ran.exitCode === 0 && ran.stdout.text.includes('ran'), JSON.stringify(ran));
+const noteText = byName.get('ssh_run').output.render({ host: 'open-host' }, ran)[0].text;
+check('host-note-in-result', noteText.startsWith('[note] open-host: 生产主库，先确认\n'), noteText.slice(0, 120));
 // Deadlines are derived per command: estimate × multiplier from the live policy.
 check('derived-deadline', seen.execTimeouts.at(-1) === 12500, `timeoutMs=${seen.execTimeouts.at(-1)}`);
 check(

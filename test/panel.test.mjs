@@ -121,7 +121,7 @@ const waitFor = async (predicate, ms = 5000) => {
   };
   const live = [connection('alpha'), connection('beta', 'connecting')];
   const pool = { aliases: ['alpha', 'beta', 'gamma'], connections: () => live };
-  const watch = createHiddenWatcher({ pool, meta });
+  const watch = createHiddenWatcher({ pool, meta, delayMs: 0 });
 
   check('watch-no-change', watch().length === 0 && closes.length === 0, JSON.stringify(closes));
   hidden.add('alpha');
@@ -134,6 +134,27 @@ const waitFor = async (predicate, ms = 5000) => {
   watch();
   await sleep(0);
   check('watch-connecting-closed-twice', closes.filter((entry) => entry.startsWith('beta:')).length === 2, JSON.stringify(closes));
+}
+
+// The 20 s grace period: hiding schedules the close, unhiding cancels it.
+{
+  const hidden = new Set();
+  const meta = { refresh: () => true, host: (alias) => ({ hidden: hidden.has(alias) }) };
+  const closes = [];
+  const connection = { alias: 'alpha', state: 'connected', close: (reason) => closes.push(reason), ensure: () => Promise.resolve() };
+  const watch = createHiddenWatcher({ pool: { aliases: ['alpha'], connections: () => [connection] }, meta, delayMs: 20 });
+  hidden.add('alpha');
+  check('watch-delay-schedules', JSON.stringify(watch()) === '["alpha"]' && closes.length === 0, JSON.stringify(closes));
+  await sleep(45);
+  check('watch-delay-closes-later', closes.length === 1, JSON.stringify(closes));
+  hidden.delete('alpha');
+  watch();
+  hidden.add('alpha');
+  check('watch-delay-reschedules', JSON.stringify(watch()) === '["alpha"]' && closes.length === 1, JSON.stringify(closes));
+  hidden.delete('alpha');
+  watch();
+  await sleep(45);
+  check('watch-unhide-cancels-close', closes.length === 1, JSON.stringify(closes));
 }
 
 // ── Control port of a real server ──────────────────────────────────────────
