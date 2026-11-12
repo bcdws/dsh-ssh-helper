@@ -98,7 +98,8 @@ check('header-row', byClass(tree, 'ssh-th').length === 1, `${byClass(tree, 'ssh-
 check('no-production-mark', byClass(tree, 'ssh-tag').length === 0, 'there must be no production mark anywhere');
 check('row-identity', byClass(tree, 'ssh-row').every((row) => byClass(row, 'ssh-keycell').length === 1), 'each row needs one key cell');
 check('row-controls', byClass(tree, 'ssh-row').every((row) => byClass(row, 'ssh-controls').length === 1), 'each row needs one control cluster');
-check('row-switches', byClass(tree, 'ssh-mini').length === 3 && byClass(tree, 'ssh-switch').length === 4, `${byClass(tree, 'ssh-switch').length} switches / ${byClass(tree, 'ssh-mini').length} labelled inline controls`);
+// Per row: the hidden switch and the prod switch; plus the settings switches.
+check('row-switches', byClass(tree, 'ssh-mini').length === 3 && byClass(tree, 'ssh-switch').length === 6, `${byClass(tree, 'ssh-switch').length} switches / ${byClass(tree, 'ssh-mini').length} labelled inline controls`);
 
 // Settings rows: control — switch or number box — in the fixed left column,
 // with every title and description starting on the same vertical line.
@@ -150,7 +151,10 @@ check('edit-dialog-actions', /取消/.test(textOf(tree)) && /保存/.test(textOf
 check('no-profile-select', byClass(tree, 'ssh-select').length === 0, `${byClass(tree, 'ssh-select').length} selects left`);
 check('no-capability-chips', byClass(tree, 'ssh-cap').length === 0, 'capability chips must stay gone');
 const rowSwitches = byClass(tree, 'ssh-row').map((row) => byClass(row, 'ssh-switch'));
-check('one-hidden-switch-per-row', rowSwitches.length === 2 && rowSwitches.every((switches) => switches.length === 1), JSON.stringify(rowSwitches.map((switches) => switches.length)));
+check('hidden-and-prod-switch-per-row', rowSwitches.length === 2 && rowSwitches.every((switches) => switches.length === 2), JSON.stringify(rowSwitches.map((switches) => switches.length)));
+const prodToggles = byClass(tree, 'ssh-prod-toggle');
+check('prod-switch-off-by-default', prodToggles.length === 2 && prodToggles.every((toggle) => byClass(toggle, 'ssh-switch')[0]?.props?.['aria-checked'] === 'false'), JSON.stringify(prodToggles.map((toggle) => byClass(toggle, 'ssh-switch')[0]?.props?.['aria-checked'])));
+check('no-prod-badge-when-unset', byClass(tree, 'ssh-prod-badge').length === 0, `${byClass(tree, 'ssh-prod-badge').length} badges`);
 check('hidden-switch-state', rowSwitches[0][0].props['aria-checked'] === 'false' && rowSwitches[1][0].props['aria-checked'] === 'true', JSON.stringify(rowSwitches.map((switches) => switches[0]?.props?.['aria-checked'])));
 check('hidden-switch-neutral', rowSwitches.every((switches) => switches[0].props.className.includes('ssh-switch-neutral')), JSON.stringify(rowSwitches.map((switches) => switches[0]?.props?.className)));
 const labels = byClass(tree, 'ssh-hidden-label');

@@ -10,8 +10,9 @@
  *  - `output.schema`                     → `outputSchema` (protocol ≥ 2025-06-18)
  *  - `output.render(args, value)`        → text `content`
  *  - the returned value                  → `structuredContent` (≥ 2025-06-18)
- *  - a thrown error                      → `isError: true`; a policy refusal also
- *    carries its fields under `_meta["dsh-ssh-helper/error"]`.
+ *  - a thrown error                      → `isError: true`, with its failure
+ *    code (`lib/errors.js`) under `_meta["dsh-ssh-helper/error"]`; a policy
+ *    refusal also carries the rule fields there.
  *
  * The command policy needs nothing here: the tools enforce it themselves.
  *
@@ -95,6 +96,7 @@ export function toMcpError(error) {
     result._meta = {
       [ERROR_META_KEY]: {
         code: error.code,
+        failureCode: 'policy_denied',
         rule: error.rule,
         title: error.title,
         reason: error.reason,
@@ -105,6 +107,8 @@ export function toMcpError(error) {
         ...(error.path === undefined ? {} : { path: error.path })
       }
     };
+  } else if (typeof error?.failureCode === 'string') {
+    result._meta = { [ERROR_META_KEY]: { failureCode: error.failureCode, hint: error.failureHint ?? null, retryable: error.retryable === true } };
   }
   return result;
 }

@@ -148,6 +148,9 @@ if (options.panel) {
   const { done } = serveStdio({ createSession: runtime.createSession });
   // After the transport is up, so the port never delays `initialize`.
   if (options.control) setImmediate(() => void runtime.startControl());
+  // `autoConnect` hosts (from --config) connect in the background, also after
+  // the transport is up so `initialize` is never delayed by a handshake.
+  setImmediate(() => runtime.prewarm());
 
   let exiting = false;
   const shutdown = (code) => {

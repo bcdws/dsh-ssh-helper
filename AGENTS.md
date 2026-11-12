@@ -53,6 +53,8 @@ scripts/pack-smoke.mjs   打包冒烟：npm pack → 装 tarball → initialize
 - 运行时依赖保持为 0：ssh2 用 `npm run build:vendor` 打包进 `vendor/ssh2.cjs`（它是 devDependency），`lib/pool.js` 通过 `require('../vendor/ssh2.cjs')` 加载。升级 ssh2 后必须重新构建；`test/mcp.test.mjs` 有打包检查，CI 也会重新构建并对比 `vendor/`，不一致就失败。不要引入 MCP SDK 之类的大依赖。
 - 工具固定 8 个，名称和参数是两个适配层共同的契约，改动要同时考虑两边。
 - 误报按 bug 处理：改 `lib/policy.js` 时，同时在 `test/safety.test.mjs` 补上拦截和放行的用例。
+- prod 标记只做提醒，不拦截（这是用户的决定）。不要借 prod 加拦截规则，护栏仍然只有 `lib/policy.js` 这一份。
+- 工具失败统一由 `lib/errors.js` 打上错误码。新增失败类型时，在 `FAILURE_CODES` 和 `RULES` 里一起加，并在 `test/failures.test.mjs` 补用例。错误提示里不能透露隐藏主机的存在。
 
 ## 测试
 
@@ -68,3 +70,5 @@ node test/run.mjs --offline
 - 需要保留目录或环境变量时，给 `ssh_run` 传 `session`；慢操作给出 `expectedMs`；守护进程用 `background: true`，不要自己加 `&`。
 - 读文件、搜内容优先用 `ssh_read` / `ssh_grep` / `ssh_glob`，小改动用 `ssh_edit`。
 - 命令被护栏拒绝时，说明意图（哪台机器、做什么、预期影响），交给用户决定，不要换一种等价写法重试。
+- 标了 `[PROD]` 的主机正在跑实际业务：优先只读检查；要重启、删除或修改配置和数据，先说明影响并取得用户确认。
+- 失败时先看 `[error: <code>]` 那一行。客户端报了超时，命令可能已经执行了，先调 `ssh_hosts` 看 `lastFailure`，再决定要不要重试；不要改用本地 ssh。

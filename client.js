@@ -30,6 +30,9 @@ window.__ModuleLoader__.load({
       visible: '可见',
       hiddenHint: '隐藏后 agent 看不到也连不上该主机，现有连接会立即断开；面板仍可重新连接和管理。',
       hiddenCount: (count) => `${count} 台隐藏`,
+      prod: '生产',
+      prodHint: '标记为生产服务器（实际业务在跑）。不拦截任何命令，但 agent 在 ssh_hosts 和每次改动类调用的结果里都会看到 [PROD] 提醒：先说明影响、取得你的确认再重启、删除或改配置/数据。',
+      prodCount: (count) => `${count} 台生产`,
       settings: '设置',
       groupOutput: '输出与上下文',
       groupConnection: '连接与空闲',
@@ -161,6 +164,9 @@ window.__ModuleLoader__.load({
 .ssh-hidden-toggle{display:inline-flex;align-items:center;gap:6px;height:26px;font-size:11.5px;color:var(--dsw-alias-label-secondary);white-space:nowrap}
 .ssh-hidden-label{opacity:.55;transition:opacity .12s ease}
 .ssh-hidden-label.is-on{opacity:1;color:var(--dsw-alias-label-primary)}
+.ssh-prod-badge{display:inline-flex;align-items:center;height:18px;padding:0 6px;margin-left:6px;border-radius:5px;font-size:10.5px;font-weight:600;letter-spacing:.04em;color:var(--dsw-alias-state-error-primary);border:1px solid var(--dsw-alias-state-error-primary);flex:0 0 auto}
+.ssh-prod-label{opacity:.55;transition:opacity .12s ease}
+.ssh-prod-label.is-on{opacity:1;color:var(--dsw-alias-state-error-primary)}
 .ssh-timeout{width:62px}
 .ssh-sec-row{flex-wrap:wrap;row-gap:8px}
 /* Narrow panel: the control cluster takes its own line under the identity. */
@@ -524,6 +530,7 @@ window.__ModuleLoader__.load({
       const hosts = state?.hosts ?? [];
       const settingsView = settings ?? state?.settings ?? { idleTimeoutMs: 0, maxOutputBytes: 32768, transferTimeoutMs: 600000, sshVisible: true, logAnalysis: false };
       const hiddenCount = hosts.filter((host) => host.hidden === true).length;
+      const prodCount = hosts.filter((host) => host.prod === true).length;
       const [editTarget, setEditTarget] = React.useState(null);
 
       const row = (host) => {
@@ -550,7 +557,8 @@ window.__ModuleLoader__.load({
                   title: `${title} — ${t('editDialog')}`,
                   onClick: () => setEditTarget(host)
                 }, host.alias)
-              : h('span', { className: 'ssh-keyname is-disabled', title }, host.alias)
+              : h('span', { className: 'ssh-keyname is-disabled', title }, host.alias),
+            host.prod === true ? h('span', { className: 'ssh-prod-badge', title: t('prodHint') }, 'PROD') : null
           ),
           h('span', { className: 'ssh-filecell' },
             keyEditable
@@ -579,6 +587,15 @@ window.__ModuleLoader__.load({
                 onChange: (next) => call('meta', { alias: host.alias, hidden: next })
               }),
               h('span', { className: `ssh-hidden-label${host.hidden === true ? ' is-on' : ''}` }, t('hidden'))
+            ),
+            h('span', { className: 'ssh-hidden-toggle ssh-prod-toggle', title: t('prodHint') },
+              h(Switch, {
+                checked: host.prod === true,
+                neutral: true,
+                label: t('prodHint'),
+                onChange: (next) => call('meta', { alias: host.alias, prod: next })
+              }),
+              h('span', { className: `ssh-prod-label${host.prod === true ? ' is-on' : ''}` }, t('prod'))
             ),
             h('span', { className: 'ssh-mini' },
               h('span', null, t('perHostIdleShort')),
@@ -796,7 +813,7 @@ window.__ModuleLoader__.load({
           { className: 'ssh-foot' },
           state === null
             ? t('loadFailed')
-            : `${state.totals.hosts} hosts · ${state.totals.connected} connected · ${state.totals.sessions} sessions${hiddenCount > 0 ? ` · ${t('hiddenCount', hiddenCount)}` : ''}${settingsView.sshVisible === false ? ` · ${t('sshVisible')}: off` : ''}`
+            : `${state.totals.hosts} hosts · ${state.totals.connected} connected · ${state.totals.sessions} sessions${hiddenCount > 0 ? ` · ${t('hiddenCount', hiddenCount)}` : ''}${prodCount > 0 ? ` · ${t('prodCount', prodCount)}` : ''}${settingsView.sshVisible === false ? ` · ${t('sshVisible')}: off` : ''}`
         )
       );
     }

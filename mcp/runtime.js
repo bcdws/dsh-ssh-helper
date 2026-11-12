@@ -54,7 +54,7 @@ export function stderrLogger({ quiet = false } = {}) {
  * @param options
  * @param options.config - raw plugin config (same keys as `cordis.patch.yml`).
  * @param options.logger - `{ info, warn }`; defaults to stderr.
- * @returns `{ pool, tools, config, meta, createSession(send), startControl(), dispose() }`.
+ * @returns `{ pool, tools, config, meta, createSession(send), startControl(), prewarm(), dispose() }`.
  */
 export function createStandaloneRuntime({ config: raw = {}, logger = stderrLogger() } = {}) {
   const config = normalizeConfig(raw);
@@ -129,6 +129,23 @@ export function createStandaloneRuntime({ config: raw = {}, logger = stderrLogge
     return session;
   };
 
+  /**
+   * Connect the `autoConnect` hosts in the background, so the agent's first
+   * call is already warm. Hidden hosts are skipped; failures only log (and
+   * land in the host's lastError for ssh_hosts).
+   */
+  const prewarm = () => {
+    const aliases = pool.autoConnectAliases().filter((alias) => pool.hostVisible(alias));
+    for (const alias of aliases) {
+      pool
+        .connection(alias)
+        .ensure()
+        .then(() => logger.info?.(`prewarmed ${alias}`))
+        .catch((error) => logger.warn?.(`prewarm of ${alias} failed: ${error instanceof Error ? error.message : String(error)}`));
+    }
+    return aliases;
+  };
+
   /** Open the panel's control port and announce this process in the run dir. */
   let control = null;
   const startControl = async ({ runDir = mcpRunDir() } = {}) => {
@@ -162,7 +179,7 @@ export function createStandaloneRuntime({ config: raw = {}, logger = stderrLogge
     control?.close();
     pool.dispose();
   };
-  return { pool, tools, config, meta, createSession, startControl, dispose };
+  return { pool, tools, config, meta, createSession, startControl, prewarm, dispose };
 }
 
 export { PACKAGE };

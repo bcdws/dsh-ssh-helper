@@ -31,7 +31,7 @@ const meta = (stored) => pool(stored).hostMeta('h');
 
 // ── the frozen host-meta shape ──────────────────────────────────────────────
 const fresh = meta(undefined);
-check('shape-keys', Object.keys(fresh).sort().join(',') === 'hidden,idleTimeoutMs,remark', Object.keys(fresh).join(','));
+check('shape-keys', Object.keys(fresh).sort().join(',') === 'hidden,idleTimeoutMs,prod,remark', Object.keys(fresh).join(','));
 check('fresh-visible', fresh.hidden === false && fresh.remark === '' && fresh.idleTimeoutMs === null, JSON.stringify(fresh));
 check('shape-has-no-legacy-fields', ['profile', 'caps', 'level', 'visible'].every((key) => !(key in fresh)), JSON.stringify(fresh));
 

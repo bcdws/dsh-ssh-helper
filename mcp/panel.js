@@ -55,6 +55,7 @@ function mergeHost(row, instances) {
       commands: live.commands ?? 0,
       lastCommand: live.lastCommand ?? null,
       lastError: live.lastError ?? null,
+      lastFailure: live.lastFailure ?? null,
       retryPaused: live.retryPaused === true
     });
   }
@@ -66,6 +67,12 @@ function mergeHost(row, instances) {
     sessions: reports.flatMap((report) => report.sessions),
     commands: reports.reduce((sum, report) => sum + report.commands, 0),
     lastError: reports.find((report) => report.lastError !== null)?.lastError ?? null,
+    // The freshest failed call across every server.
+    lastFailure:
+      reports
+        .map((report) => report.lastFailure)
+        .filter((failure) => failure !== null)
+        .sort((a, b) => a.ageSeconds - b.ageSeconds)[0] ?? null,
     retryPaused: reports.some((report) => report.retryPaused),
     instances: reports
   };

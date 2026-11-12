@@ -20,7 +20,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/20px system-ui,-app
 .row+.row{border-top:1px solid var(--b1)}
 .row:hover{background:var(--l2)}
 .th{display:flex;gap:9px 16px;padding:8px 16px;border-bottom:1px solid var(--b1);background:var(--l2);color:var(--fg2);font-size:11.5px}
-.c-host{flex:0 0 170px;min-width:0}.c-key{flex:0 0 130px;min-width:0}.c-state{flex:0 0 140px;min-width:0}.c-ctl{flex:0 0 400px;display:flex;align-items:center;gap:10px}.c-remark{flex:1 1 150px;min-width:120px}
+.c-host{flex:0 0 170px;min-width:0}.c-key{flex:0 0 130px;min-width:0}.c-state{flex:0 0 140px;min-width:0}.c-ctl{flex:0 0 470px;display:flex;align-items:center;gap:10px}.c-remark{flex:1 1 150px;min-width:120px}
 .c-ctl select.btn,.c-ctl .open{width:96px}.c-key .btn.link{margin-left:-6px;height:20px;font-size:11px}
 .name{font-weight:600}.muted{color:var(--fg2)}.small{font-size:11px}.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .state-main{display:flex;align-items:center;gap:6px}
@@ -49,6 +49,8 @@ select.btn{padding:0 8px}
 .inst{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;padding:11px 16px}.inst+.inst{border-top:1px solid var(--b1)}
 .badge{display:inline-block;padding:0 7px;border:1px solid var(--b1);border-radius:999px;font-size:11px;color:var(--fg2)}
 .badge.warn{color:var(--warn);border-color:var(--warn)}
+.badge.prod{color:var(--err);border-color:var(--err);font-weight:600;letter-spacing:.04em}
+.toggle-label.prod.on{color:var(--err)}
 .err{color:var(--err)}
 .banner{padding:9px 14px;border:1px solid var(--err);border-radius:10px;color:var(--err);background:var(--l1)}
 .notice{padding:9px 14px;border:1px solid var(--b1);border-radius:10px;color:var(--fg2);background:var(--l1)}
@@ -179,7 +181,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
       return `
         <div class="row">
           <div class="c-host">
-            <div class="name ell" title="${esc(host.alias)}">${esc(host.alias)}</div>
+            <div class="name ell" title="${esc(host.alias)}">${esc(host.alias)}${host.prod ? ' <span class="badge prod" title="生产服务器">PROD</span>' : ''}</div>
             <div class="muted small ell">${esc(host.user ?? '')}@${esc(host.host)}:${esc(host.port)}</div>
           </div>
           <div class="c-key">
@@ -190,6 +192,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
             <div class="state-main"><span class="dot ${esc(host.state)}"></span>${esc(host.retryPaused ? '已暂停' : STATE_LABEL[host.state] ?? host.state)}</div>
             <div class="muted small">${connectedIn.length > 1 ? `${connectedIn.length} 个进程 · ` : ''}${sessions} 会话 · ${esc(host.commands ?? 0)} 命令</div>
             ${host.lastError ? `<div class="err small ell" title="${esc(host.lastError)}">${esc(host.lastError)}</div>` : ''}
+            ${host.lastFailure ? `<div class="err small ell" title="${esc(`${host.lastFailure.tool}: ${host.lastFailure.message}`)}">${esc(host.lastFailure.code)} · ${esc(ago(Date.now() - host.lastFailure.ageSeconds * 1000))}</div>` : ''}
           </div>
           <div class="c-ctl">
             ${open}
@@ -199,15 +202,20 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
               <button class="switch neutral" role="switch" aria-checked="${host.hidden ? 'true' : 'false'}" data-act data-hide="${esc(host.alias)}"></button>
               <span class="toggle-label ${host.hidden ? 'on' : ''}">隐藏</span>
             </span>
+            <span class="mini" title="标记为生产服务器：不拦截命令，但 agent 在 ssh_hosts 和每次改动类调用的结果里都会看到 [PROD] 提醒，先说明影响、取得确认再动手。">
+              <button class="switch neutral" role="switch" aria-checked="${host.prod ? 'true' : 'false'}" data-act data-prod="${esc(host.alias)}"></button>
+              <span class="toggle-label prod ${host.prod ? 'on' : ''}">生产</span>
+            </span>
             <span class="mini">超时 <input class="num" type="number" min="0" placeholder="全局" title="单独的空闲超时（秒）；留空跟随全局" value="${host.idleTimeoutMs === null || host.idleTimeoutMs === undefined ? '' : esc(Math.round(host.idleTimeoutMs / 1000))}" data-idle="${esc(host.alias)}"></span>
           </div>
           <div class="c-remark"><input class="quiet" placeholder="备注…" maxlength="500" value="${esc(host.remark ?? '')}" data-remark="${esc(host.alias)}"></div>
         </div>`;
     }).join('');
     const hiddenCount = hosts.filter((host) => host.hidden).length;
+    const prodCount = hosts.filter((host) => host.prod).length;
     return `
       <section>
-        <div class="sec">连接 <span class="badge">${esc(state.totals?.connected ?? 0)} / ${hosts.length}</span>${hiddenCount ? `<span class="badge">${hiddenCount} 台隐藏</span>` : ''}</div>
+        <div class="sec">连接 <span class="badge">${esc(state.totals?.connected ?? 0)} / ${hosts.length}</span>${hiddenCount ? `<span class="badge">${hiddenCount} 台隐藏</span>` : ''}${prodCount ? `<span class="badge prod">${prodCount} 台生产</span>` : ''}</div>
         <div class="note">「隐藏」后任何 MCP 会话都看不到、也连不上它，已有连接会被断开；这里仍可管理。连接状态汇总自所有进程，悬停可看明细。</div>
         <div class="table">
           <div class="th"><div class="c-host">主机</div><div class="c-key">密钥</div><div class="c-state">状态</div><div class="c-ctl">操作</div><div class="c-remark">备注</div></div>
@@ -305,6 +313,9 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
     else if (d.hide) {
       const host = state.hosts.find((candidate) => candidate.alias === d.hide);
       post('meta', { alias: d.hide, hidden: !host?.hidden }).then(() => setTimeout(() => load(true), 1500));
+    } else if (d.prod) {
+      const host = state.hosts.find((candidate) => candidate.alias === d.prod);
+      post('meta', { alias: d.prod, prod: !host?.prod });
     } else if (d.toggleSetting) post('settings', { [d.toggleSetting]: !(state.settings ?? {})[d.toggleSetting] });
     else if (d.edit) openEdit(d.edit);
   });

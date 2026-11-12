@@ -43,7 +43,7 @@ dsh plugin --profile <profile> add "link:$PWD"
 }
 ```
 
-需要时可以在 `args` 末尾追加参数：`--config <file.json>`（与插件 config 同名的键，如 `hosts`、`exclude`）、`--ssh-config <path>`、`--state <path>`、`--no-control`、`--quiet`。
+需要时可以在 `args` 末尾追加参数：`--config <file.json>`（与插件 config 同名的键，如 `hosts`、`exclude`、`autoConnect`；设置 `"autoConnect": true` 或主机别名数组后，server 启动时会在后台预先建好连接）、`--ssh-config <path>`、`--state <path>`、`--no-control`、`--quiet`。
 
 #### 管理面板
 
@@ -59,7 +59,7 @@ npx -y github:bcdws/dsh-ssh-helper#stable panel --open
 
 页面上可以管理：
 
-- 主机的隐藏、备注、单独的空闲超时，以及输出上限、空闲超时、传输超时、日志旁路分析这几项全局设置；
+- 主机的隐藏、生产（prod）标记、备注、单独的空闲超时，以及输出上限、空闲超时、传输超时、日志旁路分析这几项全局设置；
 - 重命名 Host 和密钥文件（会修改 `~/.ssh/config`，并先备份）；
 - 本机所有正在运行的 MCP 进程（每个客户端会话一个）及其实时连接，可以手动连接或断开。
 
@@ -89,6 +89,14 @@ npx -y github:bcdws/dsh-ssh-helper#stable panel --open
 | `ssh_read` / `ssh_grep` / `ssh_glob` | 读文件、搜内容、找文件 |
 | `ssh_write` / `ssh_edit` | 写新文件 / 精确修改现有文件 |
 | `ssh_transfer` | 上传或下载单个文件 |
+
+### 生产服务器标记与失败诊断
+
+- **prod 标记**：在面板里给主机打开「生产」开关，标记会存进状态文件。它不拦截任何命令，只是提醒：`ssh_hosts` 里这台主机会带 `[PROD]`；对它调用 `ssh_run` / `ssh_write` / `ssh_edit` / `ssh_transfer` 时，结果第一行都会提醒 agent 先说明影响、取得确认，再重启、删除或修改配置和数据。
+- **错误码**：工具失败时，错误信息末尾会附一行 `[error: <code>] 下一步建议`。MCP 还会把它放进 `_meta["dsh-ssh-helper/error"]`（`failureCode` / `hint` / `retryable`）。目前的错误码有：`connect_timeout`、`connection_refused`、`host_unreachable`、`auth_failed`、`key_unusable`、`host_key_mismatch`、`transport_lost`、`exec_timeout`、`cancelled`、`policy_denied`、`unknown_host`、`local_path`、`invalid_argument`。
+- **失败记录**：失败、超时或被客户端取消的调用，都会记到这台主机的 `lastFailure`（工具、错误码、信息、发生在几秒前）和 `callFailures` 上，`ssh_hosts` 和面板里都能看到。`failures` / `lastError` 仍然只统计建连本身。
+- **本机信息**：`ssh_hosts` 会返回 `local`，即 MCP server 所在机器的 hostname、OS、cwd 和已运行时长。`ssh_transfer` 的 `localPath` 是按这台机器解析的。如果客户端报了超时，而 `local.uptimeSeconds` 很小，说明 server 是刚启动的，那次超时多半发生在启动阶段（比如 npx 拉取代码），请求并没有到达 server。
+- `lastCommandSeconds` 更名为 `lastCommandAgeSeconds`（意思是距上次命令过去了多少秒），旧字段保留一个版本。
 
 ## 安全边界
 

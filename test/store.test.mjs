@@ -20,7 +20,7 @@ const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: 
 const document = (path) => JSON.parse(readFileSync(path, 'utf8'));
 const hostsOf = (path) => document(path).hosts;
 /** The frozen shape, field names fixed by the contract. */
-const SHAPE = 'alias,hidden,idleTimeoutMs,remark';
+const SHAPE = 'alias,hidden,idleTimeoutMs,prod,remark';
 /** The only keys ever written for a host. */
 const STORED_KEYS = 'hidden,idleTimeoutMs,remark';
 /** The four settings the panel exposes, field names fixed by the contract. */
