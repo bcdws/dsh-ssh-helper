@@ -194,7 +194,8 @@ export function createPanel({ config: raw = {}, statePath = mcpStatePath(), runD
       // Refresh the server list first so the (synchronous) state projection
       // inside the API sees current connections. A meta/settings write does
       // not wait for the servers: they follow the state file within ~1s.
-      if (req.method === 'GET' && isLoopback(req) && isLoopbackHostHeader(req)) await pollInstances();
+      const isStateRead = req.method === 'GET' && /^\/api\/?(?:state)?$/.test(url.pathname);
+      if (isStateRead && isLoopback(req) && isLoopbackHostHeader(req)) await pollInstances();
       await api.handler(req, res);
       return;
     }
@@ -212,7 +213,7 @@ export function createPanel({ config: raw = {}, statePath = mcpStatePath(), runD
         'content-type': 'text/html; charset=utf-8',
         'cache-control': 'no-store',
         'x-frame-options': 'DENY',
-        'content-security-policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+        'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
       });
       res.end(page());
       return;

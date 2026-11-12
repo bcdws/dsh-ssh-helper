@@ -41,6 +41,7 @@
     "dsh/*.js",
     "mcp/*.js",
     "mcp/*.html",
+    "ui/*.js",
     "bin/*.js",
     "vendor/*.cjs",
     "vendor/*.LICENSE",

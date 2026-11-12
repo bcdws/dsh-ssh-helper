@@ -205,6 +205,16 @@ const waitFor = async (predicate, ms = 5000) => {
   const page = await raw({ port, path: '/' });
   check('page-served', page.status === 200 && /SSH 助手/.test(page.text), String(page.status));
   check('page-csp', /frame-ancestors 'none'/.test(page.headers['content-security-policy'] ?? ''), String(page.headers['content-security-policy']));
+  check('page-element', /<ssh-helper-panel api-base="\/api" mode="mcp">/.test(page.text) && page.text.includes('/api/ui/panel-element.js'), 'the page must mount the shared element');
+  const uiElement = await raw({ port, path: '/api/ui/panel-element.js' });
+  check('ui-element-served', uiElement.status === 200 && String(uiElement.headers['content-type']).startsWith('text/javascript') && uiElement.text.includes("customElements.define('ssh-helper-panel'"), `${uiElement.status} ${uiElement.text.slice(0, 80)}`);
+  const uiView = await raw({ port, path: '/api/ui/panel-view.js' });
+  check('ui-view-served', uiView.status === 200 && uiView.text.includes('export const TEXT'), `${uiView.status} ${uiView.text.slice(0, 80)}`);
+  const uiUnknown = await raw({ port, path: '/api/ui/package.json' });
+  check('ui-fixed-list', uiUnknown.status === 404, String(uiUnknown.status));
+  const uiTraversal = await raw({ port, path: '/api/ui/../package.json' });
+  check('ui-no-traversal', uiTraversal.status !== 200 || !uiTraversal.text.includes('"name"'), `${uiTraversal.status} ${uiTraversal.text.slice(0, 80)}`);
+  check('page-script-csp', /script-src 'self'/.test(page.headers['content-security-policy'] ?? ''), String(page.headers['content-security-policy']));
   const pageRebinding = await raw({ port, path: '/', headers: { host: 'evil.example' } });
   check('page-rebinding', pageRebinding.status === 403, String(pageRebinding.status));
   const apiRebinding = await raw({ port, path: '/api/state', headers: { host: `evil.example:${port}` } });

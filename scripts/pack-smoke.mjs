@@ -37,6 +37,9 @@ try {
   const files = packed.files.map((entry) => entry.path);
   if (!files.includes('vendor/ssh2.cjs')) fail('the tarball must ship vendor/ssh2.cjs');
   if (!files.includes('mcp/panel.html')) fail('the tarball must ship mcp/panel.html (the panel page)');
+  for (const asset of ['ui/panel-element.js', 'ui/panel-view.js']) {
+    if (!files.includes(asset)) fail(`the tarball must ship ${asset} (the shared panel UI)`);
+  }
 
   writeFileSync(join(work, 'package.json'), JSON.stringify({ name: 'pack-smoke', private: true }));
   execFileSync(npm, ['install', tarball, '--no-audit', '--no-fund', '--offline'], { cwd: work, stdio: 'pipe', ...npmShell });

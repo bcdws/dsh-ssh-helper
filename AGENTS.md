@@ -35,9 +35,10 @@ DSH 通过 `link:` 指向仓库目录，所以运行的就是这个目录里的�
 ## 结构与规则
 
 ```
-lib/                     共享核心：连接池、策略、工具、面板 API（assistant-api.js）。不能引用 dsh/ 或 mcp/
-index.js  dsh/  client.js   DSH 适配层
-mcp/      bin/              MCP 适配层（stdio server、控制口 control.js、面板 panel.js + panel.html）
+lib/                     共享核心：连接池、策略、工具、面板 API（assistant-api.js）。不能引用 dsh/、ui/ 或 mcp/
+ui/                      共享面板界面：panel-view.js（纯 HTML 渲染）+ panel-element.js（<ssh-helper-panel>，shadow DOM）
+index.js  dsh/  client.js   DSH 适配层（client.js 只把 <ssh-helper-panel> 挂进 DSH 的侧边栏/浮窗）
+mcp/      bin/              MCP 适配层（stdio server、控制口 control.js、面板 panel.js + panel.html 外壳）
 vendor/ssh2.cjs          预打包的 ssh2（构建产物，勿手改）
 scripts/build-vendor.mjs 重新生成 vendor/ 的脚本
 scripts/pack-smoke.mjs   打包冒烟：npm pack → 装 tarball → initialize
@@ -49,6 +50,7 @@ scripts/pack-smoke.mjs   打包冒烟：npm pack → 装 tarball → initialize
 - MCP 进程的 stdout 只能输出协议消息，日志一律写 stderr。
 - MCP server 进程从不写状态文件：默认只读跟随 `~/.dsh-ssh-mcp/state.json`，传了 `--state` 才改为跟随别的文件（比如 DSH 的）。这个文件唯一的写入方是 `dsh-ssh-mcp panel`，面板从不写 DSH 的 `state.json`。
 - 面板 API 只有一份，就是 `lib/assistant-api.js`：DSH 挂在 `/ssh-pool`，MCP 面板挂在 `/api`，并打开 `checkHost`。新增一个面板功能时，两个面板都要考虑到。
+- 面板界面也只有一份：`ui/panel-view.js` 渲染 HTML 字符串，`ui/panel-element.js` 定义 `<ssh-helper-panel>`，DSH（`client.js`）和 MCP 页面（`panel.html`）都挂它，靠 `mode="dsh|mcp"` 区分两边的差异（sshVisible 总开关、进程页、按进程连接）。新增界面功能只改 `ui/`，两边同时生效；不要往 `client.js` 或 `panel.html` 里加布局和文案。`lib/assistant-api.js` 在 `<prefix>/ui/` 下按固定白名单提供这两个文件，不能从 URL 拼路径。
 - MCP 控制口（`mcp/control.js`）只提供状态读取和 open/close。它在 `initialize` 之后才启动，不能拖慢启动。测试里要用 `DSH_SSH_MCP_HOME` 指向临时目录，不要写到真实 home。
 - 运行时依赖保持为 0：ssh2 用 `npm run build:vendor` 打包进 `vendor/ssh2.cjs`（它是 devDependency），`lib/pool.js` 通过 `require('../vendor/ssh2.cjs')` 加载。升级 ssh2 后必须重新构建；`test/mcp.test.mjs` 有打包检查，CI 也会重新构建并对比 `vendor/`，不一致就失败。不要引入 MCP SDK 之类的大依赖。
 - 工具固定 8 个，名称和参数是两个适配层共同的契约，改动要同时考虑两边。

@@ -145,6 +145,23 @@ const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: 
 check('route-shape', api.route.kind === 'prefix' && api.route.path === '/ssh-pool', JSON.stringify(api.route));
 check('token-injected', /__DSH_SSH_ASSISTANT__=\{"token":"[0-9a-f]{48}"\}/.test(api.indexInjection), api.indexInjection);
 
+// The shared `<ssh-helper-panel>` element is preloaded from the boot page and
+// served by this same route, from a fixed file list.
+check('ui-injected', api.indexInjection.includes('src="/ssh-pool/ui/panel-element.js"'), api.indexInjection);
+const uiElement = response();
+await api.route.handler(request({ url: '/ssh-pool/ui/panel-element.js' }), uiElement);
+check('ui-element-served', uiElement.state.status === 200 && String(uiElement.state.headers['content-type']).startsWith('text/javascript') && uiElement.state.body.includes("customElements.define('ssh-helper-panel'"), `${uiElement.state.status} ${uiElement.state.body.slice(0, 80)}`);
+check('ui-element-no-cookie', uiElement.state.headers['set-cookie'] === undefined, String(uiElement.state.headers['set-cookie']));
+const uiView = response();
+await api.route.handler(request({ url: '/ssh-pool/ui/panel-view.js' }), uiView);
+check('ui-view-served', uiView.state.status === 200 && uiView.state.body.includes('export const TEXT'), `${uiView.state.status} ${uiView.state.body.slice(0, 80)}`);
+const uiUnknown = response();
+await api.route.handler(request({ url: '/ssh-pool/ui/package.json' }), uiUnknown);
+check('ui-fixed-list', uiUnknown.state.status === 404, String(uiUnknown.state.status));
+const uiTraversal = response();
+await api.route.handler(request({ url: '/ssh-pool/ui/../package.json' }), uiTraversal);
+check('ui-no-traversal', uiTraversal.state.status !== 200 || !uiTraversal.state.body.includes('"name"'), `${uiTraversal.state.status} ${uiTraversal.state.body.slice(0, 80)}`);
+
 const state = await call({});
 check('get-state', state.status === 200 && state.payload.ok === true && state.payload.state.hosts.length === 2, JSON.stringify(state.payload).slice(0, 160));
 check('state-refreshes-hosts', hostRefreshes >= 1, String(hostRefreshes));

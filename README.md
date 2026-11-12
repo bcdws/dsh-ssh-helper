@@ -8,9 +8,10 @@
 - **key-only**：使用 `~/.ssh/config` 里的密钥或 ssh-agent，不支持密码，也不存私钥。
 
 ```
-lib/              共享核心：连接池、策略、工具
-index.js  dsh/    DSH 适配层（插件注册、面板、计划模式拦截）
-mcp/      bin/    MCP 适配层（stdio server + 管理面板）
+lib/              共享核心：连接池、策略、工具、面板 API
+ui/               共享面板界面：<ssh-helper-panel> 元素 + 纯渲染函数（DSH 与 MCP 共用）
+index.js  client.js  dsh/   DSH 适配层（插件注册、计划模式拦截；client.js 只负责把面板放进 DSH）
+mcp/      bin/            MCP 适配层（stdio server + 管理面板）
 ```
 
 ## 安装
@@ -51,7 +52,7 @@ dsh plugin --profile <profile> add "link:$PWD"
 npx -y github:bcdws/dsh-ssh-helper#stable panel --open
 ```
 
-在 `http://127.0.0.1:7318/` 打开一个和 DSH 插件面板类似的页面。面板只在这个终端开着时运行。
+在 `http://127.0.0.1:7318/` 打开管理页面。它和 DSH 侧边栏是同一个 `<ssh-helper-panel>` 界面（`ui/`），布局、文案和交互只维护一份。面板只在这个终端开着时运行。
 
 - 7318 已经有本机的面板在运行时，直接复用它（`--open` 会打开它），不会再起一个。
 - 7318 被别的程序占用时，自动改用下一个空闲端口，并打印出实际地址。用 `--port` 指定的端口被占用时会直接报错。
