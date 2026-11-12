@@ -24,12 +24,53 @@ const npmShell = process.platform === 'win32' ? { shell: true } : {};
 const started = Date.now();
 const work = mkdtempSync(join(tmpdir(), 'dsh-pack-smoke-'));
 
-/** Fail loudly with the reason, after cleaning up. */
+let child = null;
+
+/**
+ * Remove the temp tree without ever masking the real failure.
+ *
+ * Cleanup runs on the failure path too, so it must not throw: deleting the
+ * directory while the server process is still exiting used to surface as
+ * `ENOTEMPTY` and replace the error that actually failed the smoke. Retries
+ * cover a file that appears between listing and removal.
+ */
+function removeWork() {
+  try {
+    rmSync(work, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
+  } catch (error) {
+    console.error(`(cleanup of ${work} failed: ${error instanceof Error ? error.message : String(error)})`);
+  }
+}
+
+/** Fail loudly with the original reason, after cleaning up. */
 function fail(message) {
   console.error(`✗ ${message}`);
-  rmSync(work, { recursive: true, force: true });
+  try {
+    child?.kill('SIGKILL');
+  } catch {
+    /* already gone */
+  }
+  removeWork();
   process.exit(1);
 }
+
+/** Wait for a killed child to actually exit before its directory is removed. */
+const exitOf = (proc, timeoutMs) =>
+  new Promise((resolve) => {
+    if (proc.exitCode !== null || proc.signalCode !== null) return resolve();
+    const timer = setTimeout(() => {
+      try {
+        proc.kill('SIGKILL');
+      } catch {
+        /* already gone */
+      }
+      resolve();
+    }, timeoutMs);
+    proc.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 
 try {
   const packed = JSON.parse(execFileSync(npm, ['pack', '--json', '--pack-destination', work], { cwd: root, encoding: 'utf8', ...npmShell }))[0];
@@ -52,7 +93,7 @@ try {
   const sshConfig = join(work, 'ssh_config');
   writeFileSync(sshConfig, ['Host probe', '  HostName 192.0.2.10', '  User root', ''].join('\n'));
   const bin = join(installed, 'bin', 'dsh-ssh-mcp.js');
-  const child = spawn(process.execPath, [bin, '--ssh-config', sshConfig, '--quiet'], {
+  child = spawn(process.execPath, [bin, '--ssh-config', sshConfig, '--quiet'], {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, DSH_SSH_MCP_HOME: join(work, 'mcp-home') }
   });
@@ -74,7 +115,8 @@ try {
     }
   }
   child.kill();
-  rmSync(work, { recursive: true, force: true });
+  await exitOf(child, 3000);
+  removeWork();
 
   if (!answers.has(1) || !answers.has(2)) fail(`no initialize/tools answer within 15s${stderr ? `: ${stderr.slice(-300)}` : ''}`);
   const tools = answers.get(2).result?.tools ?? [];
