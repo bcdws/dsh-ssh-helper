@@ -7,9 +7,9 @@
  * plan-mode and local-bash guards, the side-analysis LLM route and the web
  * panel. `mcp/` plus `bin/` is the other adapter, a stdio MCP server.
  *
- * Hosts are resolved once at activation (OpenSSH config plus the plugin's own
- * `hosts`) and held in `SshPool`, so every tool call reuses an existing
- * connection instead of paying a fresh handshake. Persistent shell state is
+ * Hosts are resolved at activation (OpenSSH config plus the plugin's own
+ * `hosts`), re-read when the config changes, and held in `SshPool`, so every
+ * tool call reuses an existing connection instead of paying a fresh handshake. Persistent shell state is
  * scoped to the calling DSH session; the transport is shared because a channel
  * carries no shell state.
  *
@@ -26,7 +26,7 @@ import { commandKind, createDiagnostics } from './lib/diagnostics.js';
 import { createAnalyzer } from './dsh/llm-backend.js';
 import { isDeleteCommand, isLocalSshDelete, isPlanActive } from './dsh/plan-guard.js';
 import { createHostEditors } from './lib/host-edits.js';
-import { createHostRefresher } from './lib/host-refresh.js';
+import { createChangeRefresher, createHostRefresher } from './lib/host-refresh.js';
 
 export const name = 'ssh-pool';
 export const inject = ['tools'];
@@ -36,10 +36,18 @@ export const denyMessage = formatDenial;
 
 /**
  * Adapt a neutral tool to the DSH registry: DSH hands `execute` its own
- * execution object, the tools expect `{ callerId, signal }`.
+ * execution object, the tools expect `{ callerId, signal }`. `beforeCall` runs
+ * first (the host-table refresh), so a hand edit of ~/.ssh/config reaches the
+ * next call even when the panel is closed.
  */
-export function toDshTool(tool) {
-  return { ...tool, execute: (args, execution) => tool.execute(args, fromDshExecution(execution)) };
+export function toDshTool(tool, { beforeCall } = {}) {
+  return {
+    ...tool,
+    execute: (args, execution) => {
+      beforeCall?.();
+      return tool.execute(args, fromDshExecution(execution));
+    }
+  };
 }
 
 /** Denial for a delete attempted while plan mode is active or pending. */
@@ -88,13 +96,14 @@ export function apply(ctx, config = {}) {
    */
   const refreshHosts = createHostRefresher({ pool, config: normalized, logger: ctx.logger });
   const { renameKey, renameHost, editHost } = createHostEditors({ pool, store, config: normalized, refreshHosts, logger: ctx.logger });
+  const refreshIfChanged = createChangeRefresher({ config: normalized, refresh: refreshHosts, logger: ctx.logger });
   for (const warning of warnings) ctx.logger?.warn?.(`ssh-pool: ${warning}`);
   ctx.logger?.info?.(
     `ssh-pool: ${hosts.size} host(s) available (${[...hosts.keys()].join(', ') || 'none'}), keepalive ${normalized.keepaliveIntervalMs}ms, idle timeout ${normalized.idleTimeoutMs === 0 ? 'never' : `${normalized.idleTimeoutMs}ms`}`
   );
 
   ctx.effect(() => {
-    const tools = createTools(pool, normalized, { policy, analyzer, diagnostics }).map(toDshTool);
+    const tools = createTools(pool, normalized, { policy, analyzer, diagnostics }).map((tool) => toDshTool(tool, { beforeCall: refreshIfChanged }));
 
     // The SSH visibility switch: when off, the tools are unregistered, so no
     // session can see or call them (a context-global `tools.restrict` is

@@ -9,7 +9,7 @@
  *     adapter translates its execution shape on registration.
  *  4. The side analyzer runs over any backend that can complete one prompt.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTools } from '../lib/tools.js';
@@ -18,6 +18,7 @@ import { callContext, fromDshExecution, LOCAL_CALLER } from '../lib/call-context
 import { createSideAnalyzer, unavailableAnalyzer } from '../lib/analysis.js';
 import { createDiagnostics } from '../lib/diagnostics.js';
 import { apply, toDshTool } from '../index.js';
+import { createChangeRefresher } from '../lib/host-refresh.js';
 
 let pass = 0;
 const failures = [];
@@ -150,6 +151,62 @@ const CONFIG = { maxOutputBytes: 32768, defaultTimeoutMs: 30000 };
   const started = Date.now();
   const error = await failureOf(run.execute({ host: 't', command: 'dd if=/dev/zero of=/dev/sda' }, { agent: { id: 'x' } }));
   check('dsh-tool-denies-without-guard', error?.code === 'POLICY_DENY' && Date.now() - started < 1000, String(error));
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── host table follows hand edits of ~/.ssh/config ─────────────────────────
+{
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-refresh-'));
+  const sshConfigPath = join(dir, 'config');
+  writeFileSync(sshConfigPath, 'Host web\n  HostName 192.0.2.10\n  User root\n');
+  let calls = 0;
+  const warned = [];
+  const refreshIfChanged = createChangeRefresher({
+    config: { useSshConfig: true, sshConfigPath },
+    refresh: () => {
+      calls += 1;
+      if (calls === 2) throw new Error('broken edit');
+      return { added: [], changed: [], removed: [] };
+    },
+    logger: { warn: (message) => warned.push(message) }
+  });
+  check('refresh-baseline-only', calls === 0, `calls=${calls}`);
+  refreshIfChanged();
+  check('refresh-unchanged-skips', calls === 0, `calls=${calls}`);
+  writeFileSync(sshConfigPath, 'Host web2\n  HostName 192.0.2.10\n  User root\n');
+  refreshIfChanged();
+  refreshIfChanged();
+  check('refresh-once-per-change', calls === 1, `calls=${calls}`);
+  writeFileSync(sshConfigPath, 'Host web3\n  HostName 192.0.2.10\n  User root\n  Port 22\n');
+  check('refresh-error-swallowed', refreshIfChanged() === undefined && calls === 2 && /broken edit/.test(warned[0] ?? ''), JSON.stringify(warned));
+  rmSync(sshConfigPath);
+  check('refresh-missing-file-ok', refreshIfChanged() === undefined, 'threw on a missing config');
+  let offCalls = 0;
+  const off = createChangeRefresher({ config: { useSshConfig: false, sshConfigPath }, refresh: () => (offCalls += 1) });
+  off();
+  check('refresh-off-without-ssh-config', offCalls === 0, `calls=${offCalls}`);
+
+  // DSH adapter end to end: rename by hand, the next tool call sees the new
+  // alias (and suggests it for the old one) with the panel never opened.
+  writeFileSync(sshConfigPath, 'Host web\n  HostName 192.0.2.10\n  User root\n');
+  const registered = [];
+  const ctx = {
+    logger: { info: () => {}, warn: () => {} },
+    get: () => undefined,
+    tools: { register: (tool) => (registered.push(tool), () => {}), guard: () => () => {} },
+    effect: (callback) => (callback(), () => {}),
+    inject: () => () => {}
+  };
+  apply(ctx, { useSshConfig: true, sshConfigPath, statePath: join(dir, 'state.json') });
+  const hosts = registered.find((tool) => tool.name === 'ssh_hosts');
+  const run = registered.find((tool) => tool.name === 'ssh_run');
+  const before = await hosts.execute({}, { agent: { id: 'x' } });
+  check('dsh-hosts-initial', before.hosts.map((host) => host.alias).join(',') === 'web', JSON.stringify(before.hosts.map((host) => host.alias)));
+  writeFileSync(sshConfigPath, 'Host web-new\n  HostName 192.0.2.10\n  User root\n');
+  const after = await hosts.execute({}, { agent: { id: 'x' } });
+  check('dsh-hosts-after-rename', after.hosts.map((host) => host.alias).join(',') === 'web-new', JSON.stringify(after.hosts.map((host) => host.alias)));
+  const stale = await failureOf(run.execute({ host: 'web', command: 'uptime' }, { agent: { id: 'x' } }));
+  check('dsh-old-alias-suggests-new', /unknown ssh host "web"; did you mean "web-new"\?/.test(stale?.message ?? ''), stale?.message);
   rmSync(dir, { recursive: true, force: true });
 }
 

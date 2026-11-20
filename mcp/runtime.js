@@ -9,14 +9,14 @@
  *
  * @module dsh-ssh-helper/mcp/runtime
  */
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { buildHostTable, normalizeConfig } from '../lib/config.js';
 import { createPolicy } from '../lib/policy.js';
 import { SshPool } from '../lib/pool.js';
 import { createTools } from '../lib/tools.js';
 import { createDiagnostics } from '../lib/diagnostics.js';
 import { createSideAnalyzer, unavailableAnalyzer } from '../lib/analysis.js';
-import { createHostRefresher } from '../lib/host-refresh.js';
+import { createChangeRefresher, createHostRefresher } from '../lib/host-refresh.js';
 import { createMcpSession } from './server.js';
 import { createSamplingBackend } from './sampling.js';
 import { createStateView } from './state-view.js';
@@ -90,24 +90,7 @@ export function createStandaloneRuntime({ config: raw = {}, logger = stderrLogge
   const instructions = instructionsFor(createPolicy());
 
   /** Re-read ~/.ssh/config only when it changed since the last call. */
-  let sshConfigMtime = null;
-  const refreshIfChanged = () => {
-    if (!config.useSshConfig) return;
-    let mtime;
-    try {
-      mtime = statSync(config.sshConfigPath).mtimeMs;
-    } catch {
-      return;
-    }
-    if (sshConfigMtime === null) {
-      sshConfigMtime = mtime;
-      return;
-    }
-    if (mtime === sshConfigMtime) return;
-    sshConfigMtime = mtime;
-    refresh();
-  };
-  refreshIfChanged();
+  const refreshIfChanged = createChangeRefresher({ config, refresh, logger });
 
   // Hiding a host in the panel closes this process's live connection to it.
   const watchHidden = createHiddenWatcher({ pool, meta, logger });
