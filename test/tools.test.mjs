@@ -65,6 +65,8 @@ const ran = await byName.get('ssh_run').execute({ host: 'open-host', command: 'e
 check('visible-run-works', ran.exitCode === 0 && ran.stdout.text.includes('ran'), JSON.stringify(ran));
 const noteText = byName.get('ssh_run').output.render({ host: 'open-host' }, ran)[0].text;
 check('host-note-in-result', noteText.startsWith('[note] open-host: 生产主库，先确认\n'), noteText.slice(0, 120));
+check('host-note-in-value', JSON.stringify(ran.notices) === JSON.stringify(['[note] open-host: 生产主库，先确认']), JSON.stringify(ran.notices));
+check('host-note-not-doubled', noteText.split('[note] open-host').length === 2, noteText.slice(0, 200));
 // Deadlines are derived per command: estimate × multiplier from the live policy.
 check('derived-deadline', seen.execTimeouts.at(-1) === 12500, `timeoutMs=${seen.execTimeouts.at(-1)}`);
 check(

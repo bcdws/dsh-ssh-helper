@@ -10,7 +10,7 @@ import { createTools } from '../lib/tools.js';
 import { MetadataStore } from '../lib/store.js';
 import { SshPool } from '../lib/pool.js';
 import { createAssistantApi } from '../lib/assistant-api.js';
-import { toMcpError, ERROR_META_KEY } from '../mcp/server.js';
+import { toMcpError, toMcpResult, ERROR_META_KEY } from '../mcp/server.js';
 import { PolicyDeniedError } from '../lib/policy.js';
 
 let pass = 0;
@@ -137,6 +137,19 @@ const firstText = (tool, args, value) => tool.output.render(args, value)[0].text
   check('prod-run-marked', firstText(run, { host: 'db' }, value).startsWith('[PROD] db is a production server.'), firstText(run, { host: 'db' }, value).slice(0, 120));
   const plain = await run.execute({ host: 'web', command: 'uptime' }, {});
   check('non-prod-unmarked', !firstText(run, { host: 'web' }, plain).includes('[PROD]'), firstText(run, { host: 'web' }, plain).slice(0, 80));
+  // MCP clients that read structuredContent never see the text: the reminder
+  // must also be in the value, and the schema must allow it.
+  check('prod-run-notices', Array.isArray(value.notices) && value.notices.length === 1 && value.notices[0].startsWith('[PROD] db is a production server.'), JSON.stringify(value.notices));
+  check('prod-notices-first-key', Object.keys(value)[0] === 'notices', JSON.stringify(Object.keys(value)));
+  check('prod-text-not-doubled', firstText(run, { host: 'db' }, value).split('[PROD] db').length === 2, firstText(run, { host: 'db' }, value).slice(0, 200));
+  check('non-prod-no-notices', plain.notices === undefined, JSON.stringify(plain.notices));
+  const runProps = run.output.schema.properties;
+  check('run-schema-notices', runProps.notices?.type === 'array' && runProps.notices.items?.type === 'string', JSON.stringify(runProps.notices));
+  check('run-value-fits-schema', Object.keys(value).every((key) => key in runProps), JSON.stringify(Object.keys(value).filter((key) => !(key in runProps))));
+  const structured = toMcpResult(run, { host: 'db' }, value);
+  check('mcp-structured-notices', structured.structuredContent?.notices?.[0]?.startsWith('[PROD] db') === true, JSON.stringify(structured.structuredContent?.notices));
+  check('mcp-text-notices', structured.content[0].text.startsWith('[PROD] db is a production server.'), structured.content[0].text.slice(0, 80));
+  check('hosts-schema-no-notices', tools.get('ssh_hosts').output.schema.properties.notices === undefined, 'ssh_hosts already carries prod/remark per host');
   const read = tools.get('ssh_read');
   check('read-tools-unmarked', read.output.render({ host: 'db' }, { path: '/etc/hostname', content: 'x', totalLines: 1, offset: 1, limit: 1, truncated: false, sha256: 'a', host: 'db', analysis: null, analysisError: null })?.[0]?.text?.includes('[PROD]') !== true, 'ssh_read marked');
 
