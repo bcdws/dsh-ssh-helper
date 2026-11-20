@@ -12,6 +12,7 @@ import { SshPool } from '../lib/pool.js';
 import { createAssistantApi } from '../lib/assistant-api.js';
 import { toMcpError, toMcpResult, ERROR_META_KEY } from '../mcp/server.js';
 import { PolicyDeniedError } from '../lib/policy.js';
+import { suggestAliases, unknownHostMessage } from '../lib/alias-suggest.js';
 
 let pass = 0;
 const failures = [];
@@ -60,6 +61,36 @@ const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: 
   const policyError = annotateError(new PolicyDeniedError({ rule: 'root-delete', title: 't', reason: 'r', suggestion: 's', matches: ['rm -rf /'] }, { host: 'web', target: 'command' }, '[ssh-pool policy] refused'));
   const denied = toMcpError(policyError)._meta?.[ERROR_META_KEY];
   check('mcp-meta-policy', denied?.code === 'POLICY_DENY' && denied.failureCode === 'policy_denied' && denied.rule === 'root-delete', JSON.stringify(denied));
+}
+
+// ── unknown host: suggest the likely alias ─────────────────────────────────
+{
+  const known = ['web', 'db_main', 'db_replica', 'cache-01', 'build208', 'lab'];
+  const cases = [
+    ['dbmain', ['db_main']], // separator dropped
+    ['replica', ['db_replica']], // distinctive segment only
+    ['db', ['db_main', 'db_replica']], // shared segment: every match, table order
+    ['DB_MAIN', ['db_main']], // case
+    ['db-main', ['db_main']], // other separator
+    ['labb', ['lab']], // one typo
+    ['build', ['build208']], // prefix
+    ['cache_01', ['cache-01']],
+    ['database', []], // nothing close: no guess
+    ['a', []] // too short to guess
+  ];
+  for (const [input, expected] of cases) {
+    const got = suggestAliases(input, known);
+    check(`suggest-${input}`, JSON.stringify(got) === JSON.stringify(expected), `${input} → ${JSON.stringify(got)}`);
+  }
+  check('suggest-not-self', suggestAliases('lab', known).length === 0, JSON.stringify(suggestAliases('lab', known)));
+  check('suggest-limit', suggestAliases('h', ['h1', 'h2', 'h3', 'h4']).length <= 3, JSON.stringify(suggestAliases('h', ['h1', 'h2', 'h3', 'h4'])));
+  // Candidates are whatever the caller passes now: a renamed host is suggested under its new name.
+  check('suggest-follows-rename', JSON.stringify(suggestAliases('dbmain', ['web', 'db_primary'])) === '[]' && JSON.stringify(suggestAliases('dbprimary', ['web', 'db_primary'])) === '["db_primary"]', 'stale candidates');
+  const message = unknownHostMessage('dbmain', known);
+  check('suggest-message', message.startsWith('unknown ssh host "dbmain"; did you mean "db_main"?; known hosts: web, db_main'), message);
+  check('suggest-still-classified', classifyError(new Error(message)).code === 'unknown_host', classifyError(new Error(message)).code);
+  check('suggest-message-plain', unknownHostMessage('zzz', known) === 'unknown ssh host "zzz"; known hosts: web, db_main, db_replica, cache-01, build208, lab', unknownHostMessage('zzz', known));
+  check('suggest-message-empty', unknownHostMessage('zzz', []).endsWith('known hosts: (none available)'), unknownHostMessage('zzz', []));
 }
 
 // ── tool layer: failures recorded, prod marker, local info ─────────────────
@@ -131,6 +162,22 @@ const firstText = (tool, args, value) => tool.output.render(args, value)[0].text
     message = error.message;
   }
   check('hidden-not-recorded', pool.noted.length === 1 && /unknown ssh host "secret"/.test(message) && !/hidden/i.test(message.replace(/unknown ssh host "secret"/, '')), `${message} ${JSON.stringify(pool.noted)}`);
+  // Suggestions come from visible hosts only: a near-miss of the hidden alias
+  // must read exactly like any other unknown name.
+  const errorOf = async (tool, args) => {
+    try {
+      await tools.get(tool).execute(args, {});
+      return '';
+    } catch (error) {
+      return error.message;
+    }
+  };
+  const nearHidden = await errorOf('ssh_run', { host: 'secre', command: 'uptime' });
+  check('suggest-no-hidden-leak', /unknown ssh host "secre"/.test(nearHidden) && !nearHidden.includes('secret') && !nearHidden.includes('did you mean'), nearHidden);
+  const typo = await errorOf('ssh_run', { host: 'Web', command: 'uptime' });
+  check('suggest-run', typo.includes('did you mean "web"?') && typo.includes('[error: unknown_host]') && typo.includes('use the alias the message suggests'), typo);
+  const listedTypo = await errorOf('ssh_hosts', { host: 'dbb' });
+  check('suggest-hosts', listedTypo.includes('did you mean "db"?') && !listedTypo.includes('secret'), listedTypo);
 }
 {
   const pool = fakePool({ behaviour: { connectError: 'ssh host "web" (root@192.0.2.10:22) failed: Connection lost before handshake' } });
