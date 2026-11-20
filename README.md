@@ -43,6 +43,14 @@ dsh plugin --profile <profile> add "link:$PWD"
 
 **更新**：推到 `main` 且 CI 全绿后 `stable` 自动前进，下次启动 server 即生效。要固定版本，把 `#stable` 换成 tag（如 `#v0.6.0`）。
 
+**启动速度**：server 本身启动不到 0.1 秒，慢在 npx。`github:` 写法每次启动都要先查询 GitHub，实测约 3.5 秒，`stable` 刚更新后约 9 秒，网络或代理慢时更久；换成 tag 或加 `--offline` 也省不掉这一步。想秒开就装一次，用装好的命令启动，代价是不再自动更新：
+
+```bash
+npm install -g github:bcdws/dsh-ssh-helper#stable   # 以后更新也是这条
+```
+
+配置里的 `command` 改成 `dsh-ssh-mcp`（客户端找不到时写 `$(npm prefix -g)/bin/dsh-ssh-mcp` 的完整路径），`args` 只留可选参数。
+
 ## 管理面板
 
 ```bash
