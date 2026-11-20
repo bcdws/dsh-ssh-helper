@@ -179,9 +179,9 @@ const initParams = (protocolVersion) => ({ protocolVersion, capabilities: {}, cl
 // ── Part 2: the session core in-process ────────────────────────────────────
 const output = { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false };
 /** A session whose outgoing messages land in `sent`. */
-function makeSession(tools, capabilities = {}) {
+function makeSession(tools, capabilities = {}, options = {}) {
   const sent = [];
-  const session = createMcpSession({ tools, send: (message) => sent.push(message), serverInfo: { name: 't', version: '0' } });
+  const session = createMcpSession({ tools, send: (message) => sent.push(message), serverInfo: { name: 't', version: '0' }, ...options });
   return { session, sent, init: () => session.receive({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities, clientInfo: { name: 'unit' } } }) };
 }
 
@@ -210,6 +210,42 @@ function makeSession(tools, capabilities = {}) {
   await running;
   check('cancel-aborts', seenSignal?.aborted === true, 'signal not aborted');
   check('cancel-no-response', !sent.some((message) => message.id === 7), JSON.stringify(sent.filter((message) => message.id === 7)));
+}
+
+// A long call with a progressToken gets heartbeats (so a client may reset its
+// timeout); they stop when the call ends, and never name the host.
+{
+  let release;
+  const slow = {
+    name: 'slow',
+    description: 'waits for release',
+    parameters: { type: 'object', properties: {} },
+    output: { schema: output, render: () => [{ type: 'text', text: 'done' }] },
+    execute: () => new Promise((resolve) => (release = () => resolve({ ok: true })))
+  };
+  const { session, sent, init } = makeSession([slow], {}, { progressIntervalMs: 20 });
+  await init();
+  const running = session.receive({ jsonrpc: '2.0', id: 11, method: 'tools/call', params: { name: 'slow', arguments: { host: 'secret-db' }, _meta: { progressToken: 'tok-1' } } });
+  await sleep(90);
+  const beats = sent.filter((message) => message.method === 'notifications/progress');
+  check('progress-sent', beats.length >= 2 && beats.every((message) => message.params.progressToken === 'tok-1'), JSON.stringify(beats));
+  check('progress-increasing', beats.every((message, index) => index === 0 || message.params.progress > beats[index - 1].params.progress), JSON.stringify(beats.map((message) => message.params.progress)));
+  check('progress-no-host', beats.every((message) => !message.params.message.includes('secret-db') && message.params.message.startsWith('slow: still running')), JSON.stringify(beats[0]));
+  release();
+  await running;
+  const count = sent.filter((message) => message.method === 'notifications/progress').length;
+  await sleep(60);
+  check('progress-stops', sent.filter((message) => message.method === 'notifications/progress').length === count, 'heartbeat kept running after the result');
+  check('progress-result', sent.some((message) => message.id === 11 && message.result?.isError === false), JSON.stringify(sent.filter((message) => message.id === 11)));
+
+  // No token, no heartbeat.
+  const quiet = makeSession([slow], {}, { progressIntervalMs: 20 });
+  await quiet.init();
+  const plain = quiet.session.receive({ jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'slow', arguments: {} } });
+  await sleep(70);
+  check('progress-only-with-token', !quiet.sent.some((message) => message.method === 'notifications/progress'), JSON.stringify(quiet.sent));
+  release();
+  await plain;
 }
 
 // Non-concurrency-safe tools run one at a time; safe ones do not wait.

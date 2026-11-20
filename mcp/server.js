@@ -125,8 +125,10 @@ export function toMcpError(error) {
  *   (e.g. re-reading ~/.ssh/config).
  * @param input.logger - optional `{ info, warn }`; never stdout.
  * @param input.requestTimeoutMs - deadline for server → client requests.
+ * @param input.progressIntervalMs - how often a long `tools/call` that carries
+ *   a `progressToken` gets a `notifications/progress` heartbeat.
  */
-export function createMcpSession({ tools, send, serverInfo, instructions, beforeCall, logger, requestTimeoutMs = 120_000 }) {
+export function createMcpSession({ tools, send, serverInfo, instructions, beforeCall, logger, requestTimeoutMs = 120_000, progressIntervalMs = 10_000 }) {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   const inflight = new Map();
   const pending = new Map();
@@ -171,6 +173,23 @@ export function createMcpSession({ tools, send, serverInfo, instructions, before
     }
     const controller = new AbortController();
     inflight.set(id, controller);
+    // A client that sent a progressToken may reset its own timeout on each
+    // progress notification (MCP allows it), so a slow command is not given up
+    // on mid-run. The message never names the host: the call may target one
+    // the agent cannot see.
+    const progressToken = params?._meta?.progressToken;
+    let heartbeat = null;
+    if ((typeof progressToken === 'string' || typeof progressToken === 'number') && progressIntervalMs > 0) {
+      const began = Date.now();
+      let beats = 0;
+      heartbeat = setInterval(() => {
+        if (closed || controller.signal.aborted) return;
+        beats += 1;
+        const seconds = Math.round((Date.now() - began) / 1000);
+        send({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken, progress: beats, message: `${tool.name}: still running (${seconds}s)` } });
+      }, progressIntervalMs);
+      heartbeat.unref?.();
+    }
     const run = async () => {
       try {
         await beforeCall?.(tool.name, args);
@@ -193,6 +212,7 @@ export function createMcpSession({ tools, send, serverInfo, instructions, before
     } catch (error) {
       result = toMcpError(error);
     } finally {
+      if (heartbeat !== null) clearInterval(heartbeat);
       inflight.delete(id);
     }
     // A cancelled request gets no response (the client has already moved on).

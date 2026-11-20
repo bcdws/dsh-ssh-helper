@@ -117,7 +117,10 @@ function fakePool({ prod = new Set(), behaviour = {} } = {}) {
       ensure: async () => {
         if (behaviour.connectError !== undefined) throw new Error(behaviour.connectError);
       },
-      exec: async () => ({ stdout: 'ok\n', stderr: '', exitCode: 0, signal: null, timedOut: behaviour.timedOut === true }),
+      exec: async (_command, options) => {
+        behaviour.seenTimeouts?.push(options?.timeoutMs);
+        return { stdout: 'ok\n', stderr: '', exitCode: 0, signal: null, timedOut: behaviour.timedOut === true };
+      },
       session: () => ({ run: async () => ({ stdout: 'ok\n', stderr: '', exitCode: 0, cwd: '/root' }) })
     }),
     status: () =>
@@ -141,7 +144,7 @@ function fakePool({ prod = new Set(), behaviour = {} } = {}) {
     connections: () => []
   };
 }
-const toolsFor = (pool) => new Map(createTools(pool, { maxOutputBytes: 100000 }, {}).map((tool) => [tool.name, tool]));
+const toolsFor = (pool, config = {}) => new Map(createTools(pool, { maxOutputBytes: 100000, ...config }, {}).map((tool) => [tool.name, tool]));
 const firstText = (tool, args, value) => tool.output.render(args, value)[0].text;
 
 {
@@ -190,6 +193,20 @@ const firstText = (tool, args, value) => tool.output.render(args, value)[0].text
   }
   check('early-close-marker', message.includes('[error: closed_before_handshake]') && !message.includes('transport_lost'), message);
   check('early-close-recorded', pool.noted.at(-1)?.code === 'closed_before_handshake', JSON.stringify(pool.noted));
+}
+// ── per-call cap: the agent gets an answer before its client gives up ──────
+{
+  const seenTimeouts = [];
+  const pool = fakePool({ behaviour: { timedOut: true, seenTimeouts } });
+  const capped = toolsFor(pool, { maxCallMs: 45000 }).get('ssh_run');
+  const long = await capped.execute({ host: 'web', command: 'make all', expectedMs: 600000 }, {});
+  check('cap-clamps-deadline', seenTimeouts[0] <= 45000 && seenTimeouts[0] >= 44000 && long.timeoutMs === seenTimeouts[0] && long.deadlineSource === 'call cap', JSON.stringify({ seen: seenTimeouts[0], timeoutMs: long.timeoutMs, source: long.deadlineSource }));
+  check('cap-hint', /per-call cap \(maxCallMs=45000\)/.test(long.hint ?? '') && /background:true/.test(long.hint ?? ''), long.hint);
+  check('cap-recorded-as-timeout', pool.noted.at(-1)?.code === 'exec_timeout', JSON.stringify(pool.noted));
+  const quick = await capped.execute({ host: 'web', command: 'uptime' }, {});
+  check('cap-leaves-short-alone', seenTimeouts[1] === 15000 && quick.deadlineSource !== 'call cap', JSON.stringify({ seen: seenTimeouts[1], source: quick.deadlineSource }));
+  const off = await toolsFor(pool).get('ssh_run').execute({ host: 'web', command: 'make all', expectedMs: 600000 }, {});
+  check('cap-off-by-default', seenTimeouts[2] === 1800000 && off.deadlineSource === 'expectedMs' && !/per-call cap/.test(off.hint ?? ''), JSON.stringify({ seen: seenTimeouts[2], source: off.deadlineSource }));
 }
 {
   const pool = fakePool({ behaviour: { timedOut: true } });

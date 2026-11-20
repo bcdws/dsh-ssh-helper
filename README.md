@@ -31,6 +31,8 @@ dsh plugin --profile <profile> add "link:$PWD"
 
 可选参数：`--config <file.json>`（`hosts`、`exclude`、`autoConnect` 等）、`--ssh-config <path>`、`--state <path>`、`--no-control`、`--quiet`。
 
+客户端的工具超时较短时（比如 30 秒或 50 秒），加 `--max-call-ms` 并设得比它少几秒，例如 `--max-call-ms 45000`：`ssh_run` 到时会自己结束，返回已有输出和提示，不会被客户端直接丢弃。请求里带了 `progressToken` 的长调用，每 10 秒会收到一次进度通知，支持的客户端会据此重新计时。
+
 主机和密钥在 WSL 里、客户端在 Windows 上时，让 server 在 WSL 里跑：
 
 ```json

@@ -44,6 +44,9 @@ Options:
   --state <path>       Follow another panel state file read-only (hidden
                        hosts, output limit), e.g. ~/.dsh/ssh-pool/state.json.
                        Default: the MCP panel's own ~/.dsh-ssh-mcp/state.json
+  --max-call-ms <n>    End one ssh_run after n ms (connect included) with its
+                       partial output; set it a few seconds under the client's
+                       own tool timeout. Default 0 (off). Config key: maxCallMs
   --no-control         Do not open the loopback control port the panel uses
   --quiet              Only log warnings and errors (stderr)
   -h, --help           Show this help
@@ -76,6 +79,11 @@ function parseArgs(input) {
     else if (arg === '--config') options.config = value();
     else if (arg === '--ssh-config') options.sshConfig = value();
     else if (arg === '--state' && !options.panel) options.state = value();
+    else if (arg === '--max-call-ms' && !options.panel) {
+      const ms = Number(value());
+      if (!Number.isInteger(ms) || ms < 0) throw new Error('--max-call-ms must be a non-negative integer');
+      options.maxCallMs = ms;
+    }
     else if (arg === '--quiet') options.quiet = true;
     else if (arg === '--no-control' && !options.panel) options.control = false;
     else if (arg === '--port' && options.panel) {
@@ -115,6 +123,7 @@ if (options.config) {
 }
 if (options.sshConfig !== undefined) config.sshConfigPath = options.sshConfig;
 if (options.state !== undefined) config.statePath = options.state;
+if (options.maxCallMs !== undefined) config.maxCallMs = options.maxCallMs;
 
 const logger = stderrLogger({ quiet: options.quiet });
 
