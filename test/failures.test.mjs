@@ -31,6 +31,12 @@ const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: 
     ['tool call aborted', 'cancelled'],
     ['sftp download timed out after 600000ms', 'exec_timeout'],
     ['read ECONNRESET', 'transport_lost'],
+    // The socket closed before the server's banner: nothing ran (seen live on a throttling host).
+    ['ssh host "web" (root@192.0.2.10:22) failed: Connection lost before handshake', 'closed_before_handshake'],
+    ['kex_exchange_identification: Connection closed by remote host', 'closed_before_handshake'],
+    // A drop after the handshake stays transport_lost: the command may have run.
+    ['ssh host "web" failed: Connection lost', 'transport_lost'],
+    ['channel open failure', 'transport_lost'],
     ['local file not found: C:\\deploy\\app.bin', 'local_path'],
     ['host is required', 'invalid_argument'],
     ['something odd', 'error']
@@ -44,6 +50,9 @@ const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: 
   annotateError(error);
   check('annotate-marker-once', error.message.split('[error: auth_failed]').length === 2, error.message);
   check('annotate-fields', error.failureCode === 'auth_failed' && error.retryable === false && error.failureHint.includes('IdentityFile'), JSON.stringify(error));
+  const early = FAILURE_CODES.closed_before_handshake;
+  check('early-close-retryable', early.retryable === true && /never ran/.test(early.hint) && /retry is safe/.test(early.hint), JSON.stringify(early));
+  check('transport-lost-still-cautious', FAILURE_CODES.transport_lost.retryable === true && /already ran/.test(FAILURE_CODES.transport_lost.hint), FAILURE_CODES.transport_lost.hint);
   check('unknown-hint-does-not-mention-hiding', !/hidden/i.test(FAILURE_CODES.unknown_host.hint), FAILURE_CODES.unknown_host.hint);
 
   const meta = toMcpError(error)._meta?.[ERROR_META_KEY];
@@ -122,6 +131,18 @@ const firstText = (tool, args, value) => tool.output.render(args, value)[0].text
     message = error.message;
   }
   check('hidden-not-recorded', pool.noted.length === 1 && /unknown ssh host "secret"/.test(message) && !/hidden/i.test(message.replace(/unknown ssh host "secret"/, '')), `${message} ${JSON.stringify(pool.noted)}`);
+}
+{
+  const pool = fakePool({ behaviour: { connectError: 'ssh host "web" (root@192.0.2.10:22) failed: Connection lost before handshake' } });
+  const tools = toolsFor(pool);
+  let message = '';
+  try {
+    await tools.get('ssh_run').execute({ host: 'web', command: 'uptime' }, {});
+  } catch (error) {
+    message = error.message;
+  }
+  check('early-close-marker', message.includes('[error: closed_before_handshake]') && !message.includes('transport_lost'), message);
+  check('early-close-recorded', pool.noted.at(-1)?.code === 'closed_before_handshake', JSON.stringify(pool.noted));
 }
 {
   const pool = fakePool({ behaviour: { timedOut: true } });

@@ -96,7 +96,7 @@ npx -y github:bcdws/dsh-ssh-helper#stable panel --open
 
 - **prod 标记**：在面板里给主机打开「生产」开关，标记会存进状态文件。它不拦截任何命令，只是提醒：`ssh_hosts` 里这台主机会带 `[PROD]`；对它调用 `ssh_run` / `ssh_write` / `ssh_edit` / `ssh_transfer` 时，结果第一行都会提醒 agent 先说明影响、取得确认，再重启、删除或修改配置和数据。
 - **主机备注**：面板卡片上的备注会进入 agent 上下文——`ssh_hosts` 里显示为 `note=…`，并且对这台主机的每次工具调用结果都会带上 `[note] <alias>: <备注>`，agent 不用先列主机也能知道这台机器是做什么的。
-- **错误码**：工具失败时，错误信息末尾会附一行 `[error: <code>] 下一步建议`。MCP 还会把它放进 `_meta["dsh-ssh-helper/error"]`（`failureCode` / `hint` / `retryable`）。目前的错误码有：`connect_timeout`、`connection_refused`、`host_unreachable`、`auth_failed`、`key_unusable`、`host_key_mismatch`、`transport_lost`、`exec_timeout`、`cancelled`、`policy_denied`、`unknown_host`、`local_path`、`invalid_argument`。
+- **错误码**：工具失败时，错误信息末尾会附一行 `[error: <code>] 下一步建议`。MCP 还会把它放进 `_meta["dsh-ssh-helper/error"]`（`failureCode` / `hint` / `retryable`）。目前的错误码有：`connect_timeout`、`connection_refused`、`closed_before_handshake`、`host_unreachable`、`auth_failed`、`key_unusable`、`host_key_mismatch`、`transport_lost`、`exec_timeout`、`cancelled`、`policy_denied`、`unknown_host`、`local_path`、`invalid_argument`。
 - **失败记录**：失败、超时或被客户端取消的调用，都会记到这台主机的 `lastFailure`（工具、错误码、信息、发生在几秒前）和 `callFailures` 上，`ssh_hosts` 和面板里都能看到。`failures` / `lastError` 仍然只统计建连本身。
 - **本机信息**：`ssh_hosts` 会返回 `local`，即 MCP server 所在机器的 hostname、OS、cwd 和已运行时长。`ssh_transfer` 的 `localPath` 是按这台机器解析的。如果客户端报了超时，而 `local.uptimeSeconds` 很小，说明 server 是刚启动的，那次超时多半发生在启动阶段（比如 npx 拉取代码），请求并没有到达 server。
 - `lastCommandSeconds` 更名为 `lastCommandAgeSeconds`（意思是距上次命令过去了多少秒），旧字段保留一个版本。
