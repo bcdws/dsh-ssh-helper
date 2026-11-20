@@ -1,124 +1,96 @@
 # dsh-ssh-helper
 
-给 AI 运维个人服务器用的 SSH 连接池、8 个工具和一道防止误删系统的护栏。同一套核心有两种接入方式：**DSH 插件**，或标准的 **MCP server**（stdio，任何 MCP 客户端或网关都能接入）。
+给 AI 运维个人服务器用的 SSH 工具：常驻连接池、8 个工具、一道防止把机器搞报废的护栏。可以作为 **DSH 插件**，也可以作为标准 **stdio MCP server** 接入任何客户端。
 
-- **连接复用**：每台主机一个常驻 SSH 连接，断线自动重连，命令不再重复握手。
-- **会话隔离**：`cd` 和环境变量按调用方隔离，连接共享。
-- **安全护栏**：只拦会让整台机器报废的 6 类操作，其余放行。
-- **key-only**：使用 `~/.ssh/config` 里的密钥或 ssh-agent，不支持密码，也不存私钥。
-
-```
-lib/              共享核心：连接池、策略、工具、面板 API
-ui/               共享面板界面：<ssh-helper-panel> 元素 + 纯渲染函数（DSH 与 MCP 共用）
-index.js  client.js  dsh/   DSH 适配层（插件注册、计划模式拦截；client.js 只负责把面板放进 DSH）
-mcp/      bin/            MCP 适配层（stdio server + 管理面板）
-```
+- 每台主机一条常驻连接，断线自动重连；`cd` 和环境变量按调用方隔离。
+- 只用 `~/.ssh/config` 里的密钥或 ssh-agent，不支持密码，不保存私钥。
 
 ## 安装
 
 前置：Node.js ≥ 22，`~/.ssh/config` 里已配好主机。
 
-### 方式一：DSH 插件
+**DSH 插件**
 
 ```bash
-git clone https://github.com/bcdws/dsh-ssh-helper.git
-cd dsh-ssh-helper
+git clone https://github.com/bcdws/dsh-ssh-helper.git && cd dsh-ssh-helper
 npm install
 dsh plugin --profile <profile> add "link:$PWD"
 ```
 
-用 `dsh plugin --profile <profile> list` 确认已加载；`ssh_hosts` 的结果里出现 `[policy]` 也说明已加载。
+`ssh_hosts` 的结果里出现 `[policy]` 即为已加载。
 
-### 方式二：MCP server
-
-不需要 clone。把下面这段配置加到你的 MCP 客户端或网关里（Claude Code、Codex、Cursor 等都用同一段）：
+**MCP server**
 
 ```json
 {
   "mcpServers": {
-    "ssh": {
-      "command": "npx",
-      "args": ["-y", "github:bcdws/dsh-ssh-helper#stable"]
-    }
+    "ssh": { "command": "npx", "args": ["-y", "github:bcdws/dsh-ssh-helper#stable"] }
   }
 }
 ```
 
-需要时可以在 `args` 末尾追加参数：`--config <file.json>`（与插件 config 同名的键，如 `hosts`、`exclude`、`autoConnect`；设置 `"autoConnect": true` 或主机别名数组后，server 启动时会在后台预先建好连接）、`--ssh-config <path>`、`--state <path>`、`--no-control`、`--quiet`。
+可选参数：`--config <file.json>`（`hosts`、`exclude`、`autoConnect` 等）、`--ssh-config <path>`、`--state <path>`、`--no-control`、`--quiet`。
 
-#### 管理面板
+主机和密钥在 WSL 里、客户端在 Windows 上时，让 server 在 WSL 里跑：
+
+```json
+{ "command": "wsl.exe", "args": ["-d", "<distro>", "--", "bash", "-lc", "cd ~ && exec npx -y github:bcdws/dsh-ssh-helper#stable"] }
+```
+
+`-l` 加载 PATH（nvm/mise 等），`cd ~` 让 `localPath` 的相对路径落在 WSL 里，`exec` 让客户端能直接结束 node 进程。
+
+**更新**：推到 `main` 且 CI 全绿后 `stable` 自动前进，下次启动 server 即生效。要固定版本，把 `#stable` 换成 tag（如 `#v0.6.0`）。
+
+## 管理面板
 
 ```bash
 npx -y github:bcdws/dsh-ssh-helper#stable panel --open
 ```
 
-在 `http://127.0.0.1:7318/` 打开管理页面。它和 DSH 侧边栏是同一个 `<ssh-helper-panel>` 界面（`ui/`），布局、文案和交互只维护一份。面板只在这个终端开着时运行。
+打开 `http://127.0.0.1:7318/`（端口被占用时顺延）。界面和 DSH 侧边栏的面板是同一个。可以：
 
-- 7318 已经有本机的面板在运行时，直接复用它（`--open` 会打开它），不会再起一个。
-- 7318 被别的程序占用时，自动改用下一个空闲端口，并打印出实际地址。用 `--port` 指定的端口被占用时会直接报错。
-- Windows 和 WSL 各开各的面板：每个面板只管自己这一侧（自己的 `~/.dsh-ssh-mcp/` 和 `~/.ssh/config`），只能看到同一侧的 MCP 进程。WSL 开了镜像网络时两边共用端口，后启动的那个会认出对方不是自己这一侧的面板，自动换端口。在 WSL 里用 `--open` 会用 Windows 的浏览器打开。
+- 隐藏主机、打生产标记、写备注、设置单台主机的空闲超时；
+- 调整全局设置（输出上限、超时、日志旁路分析、地址打码）；
+- 重命名 Host 和密钥文件（修改前会备份 `~/.ssh/config`）；
+- 查看每个运行中的 MCP 进程及其连接，并手动连接或断开。
 
-页面上可以管理：
+注意：
 
-- 主机以固定宽度的卡片列出，空间够时一行三张，不够自动换行；地址、密钥、状态、生产/隐藏开关、单独的空闲超时、备注、最近失败和会话都直接显示，不用点开侧栏；
-- 主机的隐藏、生产（prod）标记、备注、单独的空闲超时，以及输出上限、空闲超时、传输超时、日志旁路分析、地址打码这几项全局设置；地址打码会把地址显示成马赛克块，只影响面板显示，截图前打开即可，不用再手动涂抹；
-- 重命名 Host 和密钥文件（会修改 `~/.ssh/config`，并先备份）；
-- 本机所有正在运行的 MCP 进程（每个客户端会话一个）及其实时连接，可以手动连接或断开。
-
-工作方式：
-
-- 设置保存在 `~/.dsh-ssh-mcp/state.json`，**只有面板写这个文件**，每个 MCP 进程只读跟随，大约 1 秒内生效。隐藏一台主机后，agent 立即失去访问，各进程到它的现有连接会在 20 秒后自动断开（给正在跑的命令留出收尾时间）；20 秒内恢复可见就不会断开。
-- 每个 MCP 进程启动后会在 `127.0.0.1` 的随机端口上开一个控制口，并把端口和令牌写进 `~/.dsh-ssh-mcp/run/<pid>.json`（权限 0600），面板通过这个文件找到它。不需要面板时可以加 `--no-control`。
-- 面板和控制口都只接受本机请求，并且会校验 `Host` 头（防 DNS rebinding）；写操作还需要令牌。面板自己不会建立 SSH 连接。
-- `DSH_SSH_MCP_HOME` 可以把上面这个目录换到别处。
-
-**更新**：`stable` 分支只在 CI 全部通过后才前进；npx 每次启动都会重新解析它，所以新版本在下次启动 server 时自动生效，不用重装。想固定版本就把 `#stable` 换成 tag（如 `#v0.6.0`），想跟最新提交就去掉 `#stable`。
-
-这个包运行时零依赖（ssh2 已预打包进 `vendor/`），npx 只解一个 tarball、不跑安装脚本，启动足够快，不会超出客户端等待 `initialize` 的时间。
-
-两种方式互不影响：
-
-- 各有各的连接池和状态文件：MCP 默认跟随自己的 `~/.dsh-ssh-mcp/state.json`，不读 DSH 面板的状态。如果想让它跟随 DSH，加 `--state ~/.dsh/ssh-pool/state.json`（只读）；这时 MCP 面板里的隐藏和设置对这个进程不生效，面板会标出来。
-- 在 DSH 面板里隐藏主机，只影响 DSH 的连接池；在 MCP 面板里隐藏主机，只影响跟随 MCP 状态文件的进程。
-- 已经装了插件的 DSH agent 不要再接这个 MCP，否则工具会重复。
+- 设置存在 `~/.dsh-ssh-mcp/state.json`，只有面板写它，MCP 进程只读跟随，约 1 秒生效。隐藏主机后 agent 立即无法访问，现有连接 20 秒后断开。
+- Windows 和 WSL 各有一套 `~/.ssh/config`、状态文件和面板，互不相通。
+- DSH 和 MCP 的状态也是分开的。想让 MCP 跟随 DSH，加 `--state ~/.dsh/ssh-pool/state.json`。
+- 已装插件的 DSH agent 不要再接 MCP，否则工具会重复。
 
 ## 工具
 
 | 工具 | 用途 |
 |---|---|
-| `ssh_hosts` | 列主机、连接状态、最后错误 |
+| `ssh_hosts` | 列主机、连接状态、最近失败、server 所在机器（`local`） |
 | `ssh_run` | 执行命令；`session` 保持目录和变量，`background` 后台运行 |
 | `ssh_read` / `ssh_grep` / `ssh_glob` | 读文件、搜内容、找文件 |
-| `ssh_write` / `ssh_edit` | 写新文件 / 精确修改现有文件 |
-| `ssh_transfer` | 上传或下载单个文件 |
+| `ssh_write` / `ssh_edit` | 写新文件 / 精确修改 |
+| `ssh_transfer` | 上传或下载单个文件（`localPath` 按 server 所在机器解析） |
 
-### 生产服务器标记与失败诊断
-
-- **prod 标记**：在面板里给主机打开「生产」开关，标记会存进状态文件。它不拦截任何命令，只是提醒：`ssh_hosts` 里这台主机会带 `[PROD]`；对它调用 `ssh_run` / `ssh_write` / `ssh_edit` / `ssh_transfer` 时，结果第一行都会提醒 agent 先说明影响、取得确认，再重启、删除或修改配置和数据。
-- **主机备注**：面板卡片上的备注会进入 agent 上下文——`ssh_hosts` 里显示为 `note=…`，并且对这台主机的每次工具调用结果都会带上 `[note] <alias>: <备注>`，agent 不用先列主机也能知道这台机器是做什么的。
-- **错误码**：工具失败时，错误信息末尾会附一行 `[error: <code>] 下一步建议`。MCP 还会把它放进 `_meta["dsh-ssh-helper/error"]`（`failureCode` / `hint` / `retryable`）。目前的错误码有：`connect_timeout`、`connection_refused`、`closed_before_handshake`、`host_unreachable`、`auth_failed`、`key_unusable`、`host_key_mismatch`、`transport_lost`、`exec_timeout`、`cancelled`、`policy_denied`、`unknown_host`、`local_path`、`invalid_argument`。
-- **失败记录**：失败、超时或被客户端取消的调用，都会记到这台主机的 `lastFailure`（工具、错误码、信息、发生在几秒前）和 `callFailures` 上，`ssh_hosts` 和面板里都能看到。`failures` / `lastError` 仍然只统计建连本身。
-- **本机信息**：`ssh_hosts` 会返回 `local`，即 MCP server 所在机器的 hostname、OS、cwd 和已运行时长。`ssh_transfer` 的 `localPath` 是按这台机器解析的。如果客户端报了超时，而 `local.uptimeSeconds` 很小，说明 server 是刚启动的，那次超时多半发生在启动阶段（比如 npx 拉取代码），请求并没有到达 server。
-- `lastCommandSeconds` 更名为 `lastCommandAgeSeconds`（意思是距上次命令过去了多少秒），旧字段保留一个版本。
+- **生产标记和备注**：只提醒、不拦截。对生产主机做修改类调用时，结果会带 `[PROD]` 提醒；有备注的主机，每次调用结果都会带 `[note]`。MCP 下两者也会放进结构化结果的 `notices` 字段。
+- **错误码**：失败时末尾附 `[error: <code>] 下一步建议`，MCP 下也放在 `_meta["dsh-ssh-helper/error"]`。错误码有：`connect_timeout`、`connection_refused`、`closed_before_handshake`、`host_unreachable`、`auth_failed`、`key_unusable`、`host_key_mismatch`、`transport_lost`、`exec_timeout`、`cancelled`、`policy_denied`、`unknown_host`、`local_path`、`invalid_argument`。失败会记到主机的 `lastFailure`。
 
 ## 安全边界
 
-**这不是沙箱。** 护栏只拦 6 类致命操作：递归删除系统目录、`mkfs` / 分区、`dd` 写块设备、覆盖设备或系统关键文件、递归改系统目录权限、`cd` 到系统目录后批量删除。业务目录（`/srv`、`/home`、`/opt`、`/var/www`、`/data`）不拦。两种方式都在工具内部执行这道检查。
+**这不是沙箱。** 护栏只拦 6 类致命操作：递归删除系统目录、`mkfs` / 分区、`dd` 写块设备、覆盖设备或系统关键文件、递归改系统目录权限、`cd` 进系统目录后批量删除。业务目录（`/srv`、`/home`、`/opt`、`/var/www`、`/data`）不拦。
 
-- 被拒时应说明意图（哪台机器、做什么、预期影响），不要换一种等价写法重试。误报按 bug 处理。
-- 计划模式拦截和本地 bash 拦截只在 DSH 里有。在 MCP 下，审批由客户端负责：工具带有只读 / 可能破坏的注解。
-- 真正可靠的保障在插件之外：远程用非 root 账号加 sudo 白名单，重要数据做快照或异机备份。
-- 日志旁路分析默认关闭。开启后日志先脱敏再交给模型（DSH 用默认模型，MCP 用客户端的 sampling）；超过 64 KB 时不再只截前一段，而是优先抽取错误/警告行及其上下文，再用开头和结尾补足，省略处有 `[... 行省略 ...]` 标记。
-- MCP 客户端没有声明 `sampling`（例如 magpie）时，不再只返回预览，而是给一份本地规则摘要：错误签名 Top 8、次数、首末时间、首末问题行和末尾 8 行。它不调用模型、文本不出本机，输出会标注“本地规则摘要（无模型）”。
+- 被拒时说明意图交给人决定，不要换等价写法重试。误报按 bug 处理。
+- MCP 下的审批由客户端负责；计划模式拦截只在 DSH 里有。
+- 真正的保障在插件之外：用非 root 账号加 sudo 白名单，重要数据做备份。
+- 日志旁路分析默认关闭。开启后日志先脱敏再交给模型；客户端不支持 `sampling` 时，改为返回本地规则摘要，不调用模型。
 
 ## 开发
 
 ```bash
-node test/run.mjs --offline   # 离线测试，不需要服务器
-node test/run.mjs             # 加上可选的 live 测试
+node test/run.mjs --offline   # 离线测试
+node test/run.mjs             # 含 live 测试，会连接真实主机
 ```
 
-推送到 `main` 后 CI 跑测试和打包冒烟，全绿则自动把 `stable` 快进到该提交；推 `v*` tag 会生成带 tarball 的 release。
+代码结构和改动规则见 [AGENTS.md](AGENTS.md)。推 `v*` tag 会生成带 tarball 的 release。
 
 ## License
 
