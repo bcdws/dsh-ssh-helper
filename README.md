@@ -29,9 +29,24 @@ dsh plugin --profile <profile> add "link:$PWD"
 }
 ```
 
-可选参数：`--config <file.json>`（`hosts`、`exclude`、`autoConnect` 等）、`--ssh-config <path>`、`--state <path>`、`--no-control`、`--quiet`。
+可选参数：`--config <file.json>`（`hosts`、`exclude`、`autoConnect` 等）、`--ssh-config <path>`、`--state <path>`、`--max-call-ms <n>`（见下）、`--no-control`、`--quiet`。
 
-客户端的工具超时较短时（比如 30 秒或 50 秒），加 `--max-call-ms` 并设得比它少几秒，例如 `--max-call-ms 45000`：`ssh_run` 到时先带着已有输出返回，命令**不会被杀**，继续跑到它自己的截止时间，最后结果记在 `ssh_hosts` 的 `lastCommand` / `lastFailure` 里。请求里带了 `progressToken` 的长调用，每 10 秒会收到一次进度通知，支持的客户端会据此重新计时。
+**客户端超时（`--max-call-ms`）**：有的客户端等一个工具调用最多几十秒（magpie 是 50 秒），超时就放弃并取消调用，agent 拿不到任何输出。把 `--max-call-ms` 设得比客户端超时少几秒即可，默认 0 不启用：
+
+```json
+"args": ["-y", "github:bcdws/dsh-ssh-helper#stable", "--max-call-ms", "45000"]
+```
+
+用 `bash -lc` 启动时，参数写进那一整段命令里（`"cd ~ && exec npx -y github:bcdws/dsh-ssh-helper#stable --max-call-ms 45000"`），不要拆成 `args` 里单独的元素。
+
+- 只管 `ssh_run`，从发起算起（含建连）。在上限内跑完的命令不受任何影响。
+- 到点时先带着已有输出返回，结果标 `detached: true`。命令**不会被杀**，继续跑到它自己的截止时间（预计时长 × 3，最长 30 分钟）。
+- 命令结束后，`ssh_hosts` 的 `lastCommand` 会带上 `[finished after cap: exit 0, 60s]` 这样的结尾；失败、超时或断线另记 `lastFailure`。agent 应该去查结果，而不是重跑。
+- 带 `session` 的命令被提前返回后，同一会话的下一条命令会立刻执行，但读到的仍是它之前的目录和变量，要等它跑完才会更新。
+- 这只是兜底：已知会跑很久的任务（构建、升级、备份）直接用 `background: true`，立刻返回并写日志。
+- DSH 插件没有客户端超时的问题，不需要设。
+
+另外两条与超时有关的行为：到了截止时间或被客户端取消的命令，插件会连同它起的子进程一起杀掉，约 2 秒内返回；请求带了 `progressToken` 的长调用，每 10 秒会收到一次进度通知，支持的客户端会据此重新计时（magpie 不会）。
 
 主机和密钥在 WSL 里、客户端在 Windows 上时，让 server 在 WSL 里跑：
 
