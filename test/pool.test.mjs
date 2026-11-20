@@ -96,25 +96,108 @@ const brokenError = await broken.ensure().then(
 check('setup-failure-rejects', /EISDIR|illegal operation|failed/.test(brokenError), brokenError);
 check('setup-failure-state', broken.state === 'down' && typeof broken.lastError === 'string' && broken.failures === 1, JSON.stringify({ state: broken.state, lastError: broken.lastError, failures: broken.failures }));
 
-// 4. The session script keeps the private umask only around its own state file
-//    and restores the login shell's umask before running the user's command.
-const scripts = [];
-const fakeHost = {
-  connected: true,
-  exec: async (command) => {
-    scripts.push(command);
-    return { stdout: '', stderr: '', exitCode: 0, timedOut: false, signal: null, aborted: false };
-  },
-  session: () => ({ run: async () => ({}) })
-};
-const session = new ShellSession(fakeHost, 'main');
-await session.run('touch build/output');
-const script = scripts[0] ?? '';
-const commandAt = script.indexOf('eval "');
-const restoreBefore = script.lastIndexOf('umask "$__dsh_umask"', commandAt);
-check('session-umask-captured', script.startsWith('__dsh_umask=$(umask)\n'), script.slice(0, 60));
-check('session-umask-restored-before-command', commandAt > 0 && restoreBefore > 0, script.slice(0, 400));
-check('session-umask-reapplied-for-state', script.indexOf('umask 077', commandAt) > commandAt, script.slice(-400));
+// 4. Session state lives in the plugin's memory: the script reports it behind
+//    a random marker on stderr, the pool strips it, and the next command gets
+//    it back on stdin (never in the script, which is the remote shell's argv).
+{
+  const calls = [];
+  let reply = () => ({});
+  const fakeHost = {
+    connected: true,
+    exec: async (command, options) => {
+      calls.push({ command, options });
+      return { stdout: '', stderr: '', exitCode: 0, timedOut: false, signal: null, aborted: false, ...reply(options) };
+    },
+    session: () => ({ run: async () => ({}) })
+  };
+  const session = new ShellSession(fakeHost, 'main');
+  reply = () => ({ trailer: "/srv/it's here\nexport FOO='bar'\n" });
+  const first = await session.run('cd /srv && export FOO=bar');
+  const [one] = calls;
+  check('state-first-no-replay', one.options.stdin === '' && !one.command.includes('eval "$(cat)"'), one.command.slice(0, 200));
+  check('state-marker-random', /^\n\x1eDSH_STATE_[0-9a-f]{16}\n$/.test(one.options.trailerMarker) && one.command.includes(`'${one.options.trailerMarker.slice(-17, -1)}'`), JSON.stringify(one.options.trailerMarker));
+  check('state-no-host-files', !/umask 077|dsh-ssh-sessions|\brm\b|\bfind\b|> "\$/.test(one.command.replace('cd /srv && export FOO=bar', '')), one.command);
+  check('state-command-without-fd9', one.command.includes(')" 9>&-'), one.command);
+  check('state-cwd-returned', first.cwd === "/srv/it's here" && session.cwd === "/srv/it's here", String(first.cwd));
+
+  reply = () => ({});
+  await session.run('make');
+  const two = calls[1];
+  check('state-replay-on-stdin', two.options.stdin === `export FOO='bar'\n\ncd '/srv/it'\\''s here'\n` && two.command.includes('eval "$(cat)" 2>/dev/null'), JSON.stringify(two.options.stdin));
+  check('state-replay-not-in-script', !two.command.includes("FOO='bar'") && !two.command.includes('/srv/it'), two.command);
+  check('state-kept-without-trailer', session.cwd === "/srv/it's here", String(session.cwd));
+  check('state-new-marker-per-call', two.options.trailerMarker !== one.options.trailerMarker, 'marker reused');
+
+  // A detached run that ends after a newer run must not overwrite newer state.
+  let lateEnd;
+  reply = (options) => {
+    lateEnd = options.onDetachedEnd;
+    return { detached: true };
+  };
+  await session.run('long-build', { detachAfterMs: 10, onDetachedEnd: () => {} });
+  reply = () => ({ trailer: '/newer\n' });
+  await session.run('cd /newer');
+  lateEnd({ exitCode: 0, stdout: '', stderr: '', trailer: '/older\n' });
+  check('state-late-detached-ignored', session.cwd === '/newer', String(session.cwd));
+  reply = () => ({ trailer: 'garbage\n' });
+  await session.run('true');
+  check('state-garbage-ignored', session.cwd === '/newer', String(session.cwd));
+
+  // The plugin deletes nothing on the host by itself: closing a session sends no command.
+  const sent = calls.length;
+  session.dispose();
+  check('session-dispose-sends-nothing', calls.length === sent, JSON.stringify(calls.slice(sent)));
+}
+
+// 4a. End to end through a real local shell standing in for the remote one:
+//     marker stripping, stdin replay, cwd/env carry-over, credential filter,
+//     and a background child that must not hold the channel open via fd 9.
+{
+  const { spawn } = await import('node:child_process');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const work = mkdtempSync(join(tmpdir(), 'dsh-session-'));
+  const localClient = {
+    exec(command, callback) {
+      const child = spawn('sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const channel = new EventEmitter();
+      channel.stderr = new EventEmitter();
+      // Re-chunk stderr one byte at a time so a marker split across chunks is covered.
+      child.stdout.on('data', (data) => channel.emit('data', data));
+      child.stderr.on('data', (data) => {
+        for (const byte of data) channel.stderr.emit('data', Buffer.from([byte]));
+      });
+      child.on('close', (code, name) => channel.emit('close', code, name));
+      channel.end = (data) => child.stdin.end(data);
+      channel.signal = () => child.kill('SIGKILL');
+      channel.close = () => child.kill('SIGKILL');
+      callback(undefined, channel);
+    }
+  };
+  const local = new HostConnection('h', spec, { ...config, maxChannelsPerHost: 2 }, logger);
+  connections.push(local);
+  local.ensure = async () => localClient;
+  const shell = local.session('main', 'owner-a');
+  const opts = { timeoutMs: 10000, maxOutputBytes: 200 };
+  const a = await shell.run(`mkdir -p '${work}/sub dir' && cd '${work}/sub dir' && export DSH_T_VAR=alpha DSH_T_TOKEN=secret && echo to-err >&2 && echo out`, opts);
+  check('local-stderr-clean', a.stderr === 'to-err\n' && a.stdout === 'out\n', JSON.stringify({ stderr: a.stderr, stdout: a.stdout }));
+  check('local-cwd', a.cwd === `${work}/sub dir`, String(a.cwd));
+  const b = await shell.run('pwd; echo "var=$DSH_T_VAR tok=${DSH_T_TOKEN:-unset}"; exec 2>/dev/null; cd /', opts);
+  check('local-carry-over', b.stdout === `${work}/sub dir\nvar=alpha tok=unset\n`, JSON.stringify(b.stdout));
+  check('local-state-despite-stderr-redirect', b.cwd === '/', String(b.cwd));
+  const other = local.session('main', 'owner-b');
+  const c = await other.run('echo "var=${DSH_T_VAR:-unset}"', opts);
+  check('local-owner-isolated', c.stdout === 'var=unset\n', JSON.stringify(c.stdout));
+  const big = await shell.run('i=0; while [ $i -lt 400 ]; do echo noise-line-$i >&2; i=$((i+1)); done; cd /tmp', opts);
+  check('local-state-survives-output-cap', big.cwd === '/tmp' && !big.stderr.includes('DSH_STATE'), String(big.cwd));
+  const began = Date.now();
+  const bg = await shell.run('sleep 3 >/dev/null 2>&1 & echo started', opts);
+  check('local-background-does-not-hold', bg.stdout === 'started\n' && Date.now() - began < 2000, `${Date.now() - began}ms`);
+  const code = await shell.run('(exit 42)', opts);
+  check('local-exit-code', code.exitCode === 42 && code.cwd === '/tmp', JSON.stringify({ exitCode: code.exitCode, cwd: code.cwd }));
+  rmSync(work, { recursive: true, force: true });
+}
 
 // 4b. Host status exposes the reconnect pause state.
 const pausedSnapshot = makeConnection();

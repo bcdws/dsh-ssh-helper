@@ -50,38 +50,29 @@ try {
   });
 
   // 3. Persistent sessions: cwd and env survive; sessions are independent.
+  //    State lives in the plugin's memory, so nothing may appear on the host.
+  const listStateFiles = async () =>
+    (
+      await pool.connection(HOST).exec('ls -A ~/.cache/dsh-ssh-sessions 2>/dev/null | wc -l; ls -d /tmp/.dsh-ssh-* 2>/dev/null | wc -l', {
+        timeoutMs: 20000,
+        maxOutputBytes: 10000
+      })
+    ).stdout.trim();
+  const filesBefore = await listStateFiles();
   const session = pool.connection(HOST).session('smoke');
   const step1 = await session.run('cd /tmp && export DSH_SMOKE_VAR=alpha && export DSH_SMOKE_TOKEN=super-secret && pwd', { timeoutMs: 20000, maxOutputBytes: 10000 });
-  const step2 = await session.run('pwd; echo "var=$DSH_SMOKE_VAR"', { timeoutMs: 20000, maxOutputBytes: 10000 });
+  const step2 = await session.run('pwd; echo "var=$DSH_SMOKE_VAR"; echo "tok=${DSH_SMOKE_TOKEN:-unset}"', { timeoutMs: 20000, maxOutputBytes: 10000 });
   const other = await pool.connection(HOST).session('other');
   const step3 = await other.run('pwd; echo "var=${DSH_SMOKE_VAR:-unset}"', { timeoutMs: 20000, maxOutputBytes: 10000 });
   record(
     'session-state',
-    step1.stdout.includes('/tmp') && step2.stdout.includes('/tmp') && step2.stdout.includes('var=alpha') && step3.stdout.includes('unset'),
+    step1.stdout.includes('/tmp') && step2.stdout.includes('/tmp') && step2.stdout.includes('var=alpha') && step2.stdout.includes('tok=unset') && step2.cwd === '/tmp' && step3.stdout.includes('unset') && !step2.stderr.includes('DSH_STATE'),
     { step1: step1.stdout.trim(), step2: step2.stdout.trim(), step3: step3.stdout.trim(), cwd: step2.cwd }
   );
 
-  // 3b. The state file must live in a private cache dir (never /tmp) and must
-  //     not persist credential-looking variables.
-  const probe = await pool.connection(HOST).exec(
-    'cd ~ && { ' +
-      'echo "dir=$(ls -d .cache/dsh-ssh-sessions 2>/dev/null || echo missing)"; ' +
-      'echo "files=$(ls -A .cache/dsh-ssh-sessions 2>/dev/null | wc -l)"; ' +
-      'echo "mode=$(stat -c %a .cache/dsh-ssh-sessions 2>/dev/null || echo none)"; ' +
-      'echo "has-cd=$(grep -l \'^cd "\' .cache/dsh-ssh-sessions/.[!.]* 2>/dev/null | wc -l)"; ' +
-      'echo "secret-hits=$(grep -rl DSH_SMOKE_TOKEN .cache/dsh-ssh-sessions/ 2>/dev/null | wc -l)"; ' +
-      'echo "tmp-files=$(ls -d /tmp/.dsh-ssh-* 2>/dev/null | wc -l)"; }',
-    { timeoutMs: 20000, maxOutputBytes: 10000 }
-  );
-  const field = (name) => {
-    const line = (probe.stdout ?? '').split('\n').find((entry) => entry.startsWith(`${name}=`));
-    return line === undefined ? 'MISSING' : line.slice(name.length + 1).trim();
-  };
-  record(
-    'session-state-location',
-    field('dir') === '.cache/dsh-ssh-sessions' && Number(field('files')) >= 1 && field('mode') === '700' && Number(field('has-cd')) >= 1 && field('secret-hits') === '0' && field('tmp-files') === '0',
-    { dir: field('dir'), files: field('files'), mode: field('mode'), hasCd: field('has-cd'), secretHits: field('secret-hits'), tmpFiles: field('tmp-files') }
-  );
+  // 3b. Sessions write nothing on the host (no state dir entries, nothing in /tmp).
+  const filesAfter = await listStateFiles();
+  record('session-state-not-on-host', filesAfter === filesBefore, { before: filesBefore, after: filesAfter });
 
   // 4. Exit-code propagation and stderr separation (subshell keeps the session alive).
   const failing = await session.run('echo to-stderr >&2; (exit 42)', { timeoutMs: 20000, maxOutputBytes: 10000 });
