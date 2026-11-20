@@ -44,9 +44,10 @@ Options:
   --state <path>       Follow another panel state file read-only (hidden
                        hosts, output limit), e.g. ~/.dsh/ssh-pool/state.json.
                        Default: the MCP panel's own ~/.dsh-ssh-mcp/state.json
-  --max-call-ms <n>    End one ssh_run after n ms (connect included) with its
-                       partial output; set it a few seconds under the client's
-                       own tool timeout. Default 0 (off). Config key: maxCallMs
+  --max-call-ms <n>    Answer one ssh_run after n ms (connect included) with
+                       the output so far; the command is not killed and keeps
+                       running to its own deadline. Set it a few seconds under
+                       the client's tool timeout. Default 0 (off). Key: maxCallMs
   --no-control         Do not open the loopback control port the panel uses
   --quiet              Only log warnings and errors (stderr)
   -h, --help           Show this help

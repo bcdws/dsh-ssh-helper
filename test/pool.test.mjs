@@ -7,7 +7,7 @@
  * Every case uses a fake client; nothing here opens a socket.
  */
 import { EventEmitter } from 'node:events';
-import { HostConnection, ShellSession, SshPool } from '../lib/pool.js';
+import { HostConnection, ShellSession, SshPool, killSessionScript } from '../lib/pool.js';
 
 const spec = { alias: 'h', host: '127.0.0.1', port: 22, user: 'root', source: 'config' };
 const config = { connectTimeoutMs: 100, keepaliveIntervalMs: 0, keepaliveCountMax: 1, hostKeyPolicy: 'off', maxChannelsPerHost: 1 };
@@ -25,10 +25,12 @@ function channelFor(command) {
 }
 
 const connections = [];
+/** Every exec carries a PID-marker line first; fakes see only the caller's command. */
+const userCommand = (command) => (command.startsWith("printf '\\036DSH") ? command.slice(command.indexOf('\n') + 1) : command);
 const connectionWith = (exec) => {
   const connection = makeConnection();
   connections.push(connection);
-  connection.ensure = async () => ({ exec });
+  connection.ensure = async () => ({ exec: (command, callback) => exec(userCommand(command), callback) });
   return connection;
 };
 
@@ -149,6 +151,83 @@ busy.beginWork();
 check('busy-while-work', busy.busy === true, String(busy.busy));
 busy.endWork();
 check('idle-after-work', busy.busy === false, String(busy.busy));
+
+// 6. Deadline: the PID marker is stripped from stderr, the whole remote
+//    session is killed from a second channel, and the caller is answered
+//    within the grace period even though this channel never closes.
+{
+  const sent = [];
+  let main;
+  const raw = makeConnection();
+  connections.push(raw);
+  raw.ensure = async () => ({
+    exec: (command, callback) => {
+      sent.push(command);
+      const channel = channelFor(command);
+      if (sent.length === 1) {
+        main = channel;
+        setImmediate(() => {
+          callback(null, channel);
+          channel.stderr.emit('data', Buffer.from('\x1eDSH 4242 98765\nreal warning\n'));
+        });
+      } else {
+        setImmediate(() => {
+          callback(null, channel);
+          channel.emit('close', 0);
+        });
+      }
+    }
+  });
+  const begun = Date.now();
+  const keep = setTimeout(() => {}, 4000);
+  const result = await raw.exec('sleep 60', { timeoutMs: 50 });
+  clearTimeout(keep);
+  const waited = Date.now() - begun;
+  check('marker-prefixed', sent[0].startsWith("printf '\\036DSH") && sent[0].endsWith('\nsleep 60'), JSON.stringify(sent[0]));
+  check('marker-stripped', result.stderr === 'real warning\n', JSON.stringify(result.stderr));
+  check('kill-sent', sent.length === 2 && sent[1] === killSessionScript(4242, '98765'), JSON.stringify(sent[1]));
+  check('deadline-answers-in-grace', result.timedOut === true && waited < 3000 && waited >= 50, `waited ${waited}ms`);
+  check('slot-held-until-close', raw.busy === true, 'slot released before the channel closed');
+  main.emit('close', null, 'KILL');
+  check('slot-released-on-close', raw.busy === false, 'slot still held after close');
+}
+
+// 7. Kill script: kills group and session, but only when the PID still is the
+//    recorded process; a non-numeric start time disables the check, never injects.
+{
+  const script = killSessionScript(4242, '98765');
+  check('kill-script-guard', script.includes("s='98765'") && script.includes('|| exit 0') && script.includes('kill -KILL -- "-$p"') && script.includes('pkill -KILL -s "$p"'), script);
+  check('kill-script-no-injection', killSessionScript(4242, "1'; rm -rf /; '").includes("s=''"), killSessionScript(4242, "1'; rm -rf /; '"));
+}
+
+// 8. Detach (the per-call cap): answer early with the output so far, keep the
+//    channel and its slot, and report the real end later — no kill.
+{
+  const sent = [];
+  let main;
+  const raw = makeConnection();
+  connections.push(raw);
+  raw.ensure = async () => ({
+    exec: (command, callback) => {
+      sent.push(command);
+      main = channelFor(command);
+      setImmediate(() => {
+        callback(null, main);
+        main.emit('data', Buffer.from('step 1\n'));
+      });
+    }
+  });
+  let ended = null;
+  const keep = setTimeout(() => {}, 1000);
+  const early = await raw.exec('make all', { timeoutMs: 60000, detachAfterMs: 40, onDetachedEnd: (outcome) => (ended = outcome) });
+  clearTimeout(keep);
+  check('detach-answers-early', early.detached === true && early.stdout === 'step 1\n' && early.timedOut === false, JSON.stringify(early));
+  check('detach-no-kill', sent.length === 1, JSON.stringify(sent));
+  check('detach-keeps-slot', raw.busy === true, 'slot released while the command still runs');
+  main.emit('data', Buffer.from('step 2\n'));
+  main.emit('close', 0);
+  check('detach-late-end', ended?.exitCode === 0 && ended.stdout === 'step 1\nstep 2\n' && raw.busy === false, JSON.stringify(ended));
+}
 
 for (const connection of connections) connection.dispose();
 console.log(`${pass}/${pass + failures.length} passed`);
