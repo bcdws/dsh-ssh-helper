@@ -69,7 +69,7 @@ node test/run.mjs --offline
 ## 调用这些工具时
 
 - 先调 `ssh_hosts` 看有哪些主机。
-- 需要保留目录或环境变量时，给 `ssh_run` 传 `session`；慢操作给出 `expectedMs`；守护进程用 `background: true`，不要自己加 `&`。后台模式会在服务器上留日志和同目录的 `.dsh-ssh-run-<hash>.sh`（命令正文）：进程退出后按精确路径删掉脚本，先 `ls -a` 看一眼再用 `rm -f -- <路径>`，不要用通配符猜。脚本不会自删（`trap` 在 `SIGKILL` 下不执行）。
+- 需要保留目录或环境变量时，给 `ssh_run` 传 `session`；慢操作给出 `expectedMs`；守护进程用 `background: true`，不要自己加 `&`。后台模式会在服务器上留下日志和存放命令正文的 `.dsh-ssh-run-<hash>.sh`，路径见结果里的 `logPath` / `scriptPath`（脚本总在插件日志目录，不一定和日志同目录）。
 - 读文件、搜内容优先用 `ssh_read` / `ssh_grep` / `ssh_glob`，小改动用 `ssh_edit`。
 - 命令被护栏拒绝时，说明意图（哪台机器、做什么、预期影响），交给用户决定，不要换一种等价写法重试。
 - 标了 `[PROD]` 的主机正在跑实际业务：优先只读检查；要重启、删除或修改配置和数据，先说明影响并取得用户确认。

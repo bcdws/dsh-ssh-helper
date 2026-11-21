@@ -96,7 +96,7 @@ npx -y github:bcdws/dsh-ssh-helper#stable panel --open
 | `ssh_write` / `ssh_edit` | 写新文件 / 精确修改 |
 | `ssh_transfer` | 上传或下载单个文件（`localPath` 按 server 所在机器解析） |
 
-- **后台模式留下的文件**：`background: true` 会在服务器上留两个文件——日志（路径在结果里返回）和同目录下的隐藏脚本 `.dsh-ssh-run-<hash>.sh`（存放命令正文，权限 700）。脚本不能自删：shell 的 `trap` 在 `SIGKILL` 下不会执行，所以由调用方在进程退出后按精确路径清理。目录默认是 `~/.local/state/dsh-ssh/logs/`（可用 `DSH_SSH_LOG_DIR` 改），先 `ls -a` 或 `ssh_glob` 看一眼，再用 `rm -f -- <目录>/.dsh-ssh-run-<hash>.sh` 删，不要用通配符猜。
+- **后台模式留下的文件**：`background: true` 会在服务器上留两个文件，结果里都会返回路径：日志（`logPath`）和隐藏脚本 `.dsh-ssh-run-<hash>.sh`（`scriptPath`，存放命令正文，权限 700）。脚本总在插件的日志目录 `~/.local/state/dsh-ssh/logs/`（可用 `DSH_SSH_LOG_DIR` 改），即使用 `logPath` 把日志放到了别处。插件不会删除这两个文件。
 - **生产标记和备注**：只提醒、不拦截。对生产主机做修改类调用时，结果会带 `[PROD]` 提醒；有备注的主机，每次调用结果都会带 `[note]`。MCP 下两者也会放进结构化结果的 `notices` 字段。
 - **错误码**：失败时末尾附 `[error: <code>] 下一步建议`，MCP 下也放在 `_meta["dsh-ssh-helper/error"]`。错误码有：`connect_timeout`、`connection_refused`、`closed_before_handshake`、`host_unreachable`、`auth_failed`、`key_unusable`、`host_key_mismatch`、`transport_lost`、`exec_timeout`、`cancelled`、`policy_denied`、`unknown_host`、`local_path`、`invalid_argument`。失败会记到主机的 `lastFailure`。
 

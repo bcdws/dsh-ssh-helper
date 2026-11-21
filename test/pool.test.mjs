@@ -203,7 +203,7 @@ check('setup-failure-state', broken.state === 'down' && typeof broken.lastError 
 //       script for the caller to remove, never pretending to have cleaned up.
 {
   const { spawn } = await import('node:child_process');
-  const { mkdtempSync, rmSync, existsSync, readdirSync, readFileSync } = await import('node:fs');
+  const { mkdtempSync, mkdirSync, rmSync, existsSync, readdirSync, readFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const work = mkdtempSync(join(tmpdir(), 'dsh-bg-'));
@@ -239,11 +239,24 @@ check('setup-failure-state', broken.state === 'down' && typeof broken.lastError 
     // so the caller removes it by path. This test pins that contract.
     const scripts = readdirSync(logDir).filter((name) => /^\.dsh-ssh-run-[0-9a-f]+\.sh$/.test(name));
     check('background-script-left-for-caller', scripts.length === 1, JSON.stringify(readdirSync(logDir)));
-    // An explicit logPath is honoured.
-    const explicit = join(work, 'explicit.log');
+    // The exact script path is returned, so the caller never has to guess.
+    check(
+      'background-script-path-returned',
+      started.scriptPath === join(logDir, scripts[0] ?? '') && existsSync(started.scriptPath) && readFileSync(started.scriptPath, 'utf8').includes('echo bg-hello'),
+      String(started.scriptPath)
+    );
+    // An explicit logPath is honoured; the script still goes to the plugin's
+    // log directory, not next to the log, and its returned path says so.
+    mkdirSync(join(work, 'custom'));
+    const explicit = join(work, 'custom', 'explicit.log');
     const second = await local.background('echo explicit-line', { logPath: explicit });
     await new Promise((resolve) => setTimeout(resolve, 800));
     check('background-explicit-log', second.logPath === explicit && existsSync(explicit) && readFileSync(explicit, 'utf8').includes('explicit-line'), String(second.logPath));
+    check(
+      'background-explicit-log-script-in-log-dir',
+      typeof second.scriptPath === 'string' && second.scriptPath.startsWith(`${logDir}/.dsh-ssh-run-`) && existsSync(second.scriptPath) && second.scriptPath !== started.scriptPath && readdirSync(join(work, 'custom')).join() === 'explicit.log',
+      `${second.scriptPath} | custom: ${JSON.stringify(readdirSync(join(work, 'custom')))}`
+    );
   } finally {
     if (previousLogDir === undefined) delete process.env.DSH_SSH_LOG_DIR;
     else process.env.DSH_SSH_LOG_DIR = previousLogDir;
