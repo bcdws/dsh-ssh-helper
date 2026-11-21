@@ -446,16 +446,19 @@ export function renderDiagnostics(state, { mode }) {
 
 // ── dialog, banners, footer ─────────────────────────────────────────────────
 
-export function renderEditDialog(host, { error = null, saving = false, masked = false } = {}) {
+export function renderEditDialog(host, { error = null, saving = false, masked = false, draft = null } = {}) {
   if (!host) return '';
   const keyEditable = typeof host.keyName === 'string' && host.keyName.length > 0 && !host.keyName.startsWith('agent:');
+  // A redraw while saving, or after a refused save, keeps what was typed.
+  const aliasValue = typeof draft?.alias === 'string' ? draft.alias : host.alias;
+  const keyValue = keyEditable && typeof draft?.keyName === 'string' ? draft.keyName : host.keyName ?? '—';
   return `<div class="backdrop" data-dialog-backdrop>
   <form class="dialog" role="dialog" aria-modal="true" aria-label="${TEXT.editDialog}">
     <div class="dialog-title">${TEXT.editDialog}</div>
     <div class="dialog-desc">${TEXT.editDialogDesc}</div>
     <div class="dialog-host">${masked ? mosaicHtml(host) : esc(addressText(host))}</div>
-    <label class="field"><span>${TEXT.hostNameLabel}</span><input class="text" name="alias" value="${esc(host.alias)}" autocomplete="off" spellcheck="false" ${saving ? 'disabled' : ''}></label>
-    <label class="field"><span>${TEXT.keyNameLabel}</span><input class="text" name="key" value="${esc(host.keyName ?? '—')}" autocomplete="off" spellcheck="false" ${keyEditable && !saving ? '' : 'disabled'}></label>
+    <label class="field"><span>${TEXT.hostNameLabel}</span><input class="text" name="alias" value="${esc(aliasValue)}" autocomplete="off" spellcheck="false" ${saving ? 'disabled' : ''}></label>
+    <label class="field"><span>${TEXT.keyNameLabel}</span><input class="text" name="key" value="${esc(keyValue)}" autocomplete="off" spellcheck="false" ${keyEditable && !saving ? '' : 'disabled'}></label>
     <div class="dialog-desc">${TEXT.editDialogWarning}</div>
     ${error ? `<div class="fail">${esc(error)}</div>` : ''}
     <div class="dialog-actions"><button type="button" class="btn" data-dialog-cancel ${saving ? 'disabled' : ''}>${TEXT.cancel}</button><button type="submit" class="btn primary" ${saving ? 'disabled' : ''}>${TEXT.save}</button></div>

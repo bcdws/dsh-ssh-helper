@@ -208,6 +208,9 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   check('dialog-agent-key', renderEditDialog({ ...web, keyName: 'agent:default' }).includes('name="key" value="agent:default"') && /name="key"[^>]*disabled/.test(renderEditDialog({ ...web, keyName: 'agent:default' })), 'agent keys are read-only');
   check('dialog-error', renderEditDialog(web, { error: '改名失败', saving: true }).includes('改名失败'), 'error line');
   check('dialog-none', renderEditDialog(null) === '', 'no dialog');
+  const drafted = renderEditDialog(web, { saving: true, draft: { alias: 'web2', keyName: 'id_web2' } });
+  check('dialog-draft-kept', drafted.includes('value="web2"') && drafted.includes('value="id_web2"') && !drafted.includes('value="id_web"'), 'a redraw while saving keeps the typed names');
+  check('dialog-draft-agent', renderEditDialog({ ...web, keyName: 'agent:default' }, { draft: { alias: 'web', keyName: 'x' } }).includes('name="key" value="agent:default"'), 'a draft never replaces a read-only key');
 
   const banners = renderBanners({ error: '挂了', notice: '保存失败' });
   check('banners', banners.includes('banner err') && banners.includes('挂了') && banners.includes('banner warn'), banners);
@@ -261,6 +264,28 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   tokenPanel.token = 'abc';
   tokenPanel.token = '';
   check('token-property', tokenPanel.credential === 'abc', String(tokenPanel.credential));
+
+  // An open edit dialog is redrawn only by its own transitions. A poll or the
+  // focusout catch-up used to rebuild the form between the Save button's
+  // mousedown and mouseup, so the click was lost and the typed key name reset.
+  {
+    const panel = makePanel();
+    panel.render = SshHelperPanel.prototype.render;
+    panel.tab = 'hosts';
+    panel.state = { hosts: [web], settings: {} };
+    panel.frame = { innerHTML: 'UNTOUCHED' };
+    panel.shadowRoot = { activeElement: null, querySelector: () => null };
+    panel.dialog = { host: web, error: null, saving: false };
+    panel.render();
+    check('dialog-no-passive-redraw', panel.frame.innerHTML === 'UNTOUCHED', 'a non-forced render must leave an open dialog alone');
+    panel.dialog = { ...panel.dialog, saving: true, draft: { alias: 'web', keyName: 'id_new' } };
+    panel.render(true);
+    check('dialog-forced-redraw', panel.frame.innerHTML.includes('value="id_new"'), 'a forced render shows the draft');
+    panel.dialog = null;
+    panel.frame.innerHTML = 'UNTOUCHED';
+    panel.render();
+    check('closed-dialog-redraws', panel.frame.innerHTML !== 'UNTOUCHED', 'polls redraw again once the dialog is closed');
+  }
 
   const calls = [];
   let queue = [];

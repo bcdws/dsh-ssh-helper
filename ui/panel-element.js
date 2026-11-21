@@ -321,7 +321,11 @@ class SshHelperPanel extends HTMLElement {
   }
 
   render(force = false) {
-    if (!force && this.editing()) return;
+    // While the edit dialog is open, only its own transitions redraw: a poll
+    // or the focusout catch-up would rebuild the form between the Save
+    // button's mousedown and mouseup, dropping both the click and the typed
+    // names.
+    if (!force && (this.editing() || this.dialog)) return;
     const options = { mode: this.mode };
     if (!tabsFor(this.mode).includes(this.tab)) this.tab = 'hosts';
     const bodyScroll = this.shadowRoot.querySelector('.body')?.scrollTop ?? 0;
@@ -439,7 +443,7 @@ class SshHelperPanel extends HTMLElement {
       this.closeDialog();
       return;
     }
-    this.dialog = { ...this.dialog, saving: true, error: null };
+    this.dialog = { ...this.dialog, saving: true, error: null, draft: { alias: newAlias, keyName } };
     this.render(true);
     try {
       await this.call('edit-host', body, { retry: false });
