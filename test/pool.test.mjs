@@ -199,6 +199,89 @@ check('setup-failure-state', broken.state === 'down' && typeof broken.lastError 
   rmSync(work, { recursive: true, force: true });
 }
 
+// 4a-2. background(): the returned log path is real and the call leaves the
+//       script for the caller to remove, never pretending to have cleaned up.
+{
+  const { spawn } = await import('node:child_process');
+  const { mkdtempSync, rmSync, existsSync, readdirSync, readFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const work = mkdtempSync(join(tmpdir(), 'dsh-bg-'));
+  const logDir = join(work, 'logs');
+  const localClient = {
+    exec(command, callback) {
+      const child = spawn('sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const channel = new EventEmitter();
+      channel.stderr = new EventEmitter();
+      child.stdout.on('data', (data) => channel.emit('data', data));
+      child.stderr.on('data', (data) => channel.stderr.emit('data', data));
+      child.on('close', (code, name) => channel.emit('close', code, name));
+      channel.end = (data) => child.stdin.end(data);
+      channel.signal = () => child.kill('SIGKILL');
+      channel.close = () => child.kill('SIGKILL');
+      callback(undefined, channel);
+    }
+  };
+  const local = new HostConnection('h', spec, config, logger);
+  connections.push(local);
+  local.ensure = async () => localClient;
+  // Point the default log directory at the temp tree through the documented
+  // environment override, so the test never touches the real home directory.
+  const previousLogDir = process.env.DSH_SSH_LOG_DIR;
+  process.env.DSH_SSH_LOG_DIR = logDir;
+  try {
+    const started = await local.background('echo bg-hello; sleep 0.2; echo bg-bye', {});
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    check('background-pid', typeof started.pid === 'number' && started.pid > 0, String(started.pid));
+    check('background-log-path-returned', typeof started.logPath === 'string' && started.logPath.startsWith(logDir), String(started.logPath));
+    check('background-log-written', existsSync(started.logPath) && readFileSync(started.logPath, 'utf8').includes('bg-bye'), 'log missing its output');
+    // The script stays behind on purpose: it cannot reliably delete itself,
+    // so the caller removes it by path. This test pins that contract.
+    const scripts = readdirSync(logDir).filter((name) => /^\.dsh-ssh-run-[0-9a-f]+\.sh$/.test(name));
+    check('background-script-left-for-caller', scripts.length === 1, JSON.stringify(readdirSync(logDir)));
+    // An explicit logPath is honoured.
+    const explicit = join(work, 'explicit.log');
+    const second = await local.background('echo explicit-line', { logPath: explicit });
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    check('background-explicit-log', second.logPath === explicit && existsSync(explicit) && readFileSync(explicit, 'utf8').includes('explicit-line'), String(second.logPath));
+  } finally {
+    if (previousLogDir === undefined) delete process.env.DSH_SSH_LOG_DIR;
+    else process.env.DSH_SSH_LOG_DIR = previousLogDir;
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+// 4a-3. background() refuses a log path the file tools would also refuse.
+{
+  const local = new HostConnection('h', spec, config, logger);
+  connections.push(local);
+  local.ensure = async () => {
+    throw new Error('the guard must run before any connection');
+  };
+  let refused = null;
+  try {
+    await local.background('echo x', { logPath: '/boot/grub/grub.cfg' });
+  } catch (error) {
+    refused = error;
+  }
+  check('background-refuses-boot-log', refused !== null && refused.code === 'POLICY_DENY' && refused.rule === 'danger.write-system', String(refused?.message ?? 'allowed'));
+  let deviceRefused = null;
+  try {
+    await local.background('echo x', { logPath: '/dev/sda' });
+  } catch (error) {
+    deviceRefused = error;
+  }
+  check('background-refuses-device-log', deviceRefused !== null && deviceRefused.rule === 'danger.write-device', String(deviceRefused?.message ?? 'allowed'));
+  // The plugin's own default directory is ordinary work.
+  let defaultOk = null;
+  try {
+    await local.background('echo x', { logPath: '/root/.local/state/dsh-ssh/logs/app.log' });
+  } catch (error) {
+    defaultOk = error;
+  }
+  check('background-allows-default-dir', defaultOk === null || !/policy/.test(String(defaultOk.message)), String(defaultOk?.message ?? ''));
+}
+
 // 4b. Host status exposes the reconnect pause state.
 const pausedSnapshot = makeConnection();
 connections.push(pausedSnapshot);

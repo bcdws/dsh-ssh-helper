@@ -188,6 +188,20 @@ try {
   );
   await pool.connection(HOST).exec(`rm -f ${q(bg.logPath ?? '')}`, { timeoutMs: 10000, maxOutputBytes: 2000 }).catch(() => {});
 
+  // 6c. The background script is left behind on purpose (a shell trap cannot
+  //     run on SIGKILL), so the caller removes it by the path it can derive
+  //     from the log directory. This pins that the leftover is discoverable
+  //     and removable with an exact path rather than a wildcard.
+  const bgDir = bg.logPath === null || bg.logPath === undefined ? '' : bg.logPath.slice(0, bg.logPath.lastIndexOf('/'));
+  const listed = bgDir === '' ? '' : (await pool.connection(HOST).exec(`ls -a ${q(bgDir)} 2>/dev/null`, { timeoutMs: 20000, maxOutputBytes: 10000 })).stdout;
+  const leftover = /(\.dsh-ssh-run-[0-9a-f]+\.sh)/.exec(listed);
+  record('background-script-discoverable', leftover !== null, { dir: bgDir, listed: listed.trim().split('\n').slice(-6) });
+  if (leftover !== null) {
+    const removed = await pool.connection(HOST).exec(`rm -f -- ${q(`${bgDir}/${leftover[1]}`)}`, { timeoutMs: 10000, maxOutputBytes: 2000 });
+    const after = await pool.connection(HOST).exec(`ls -a ${q(bgDir)} 2>/dev/null`, { timeoutMs: 20000, maxOutputBytes: 10000 });
+    record('background-script-removable', removed.exitCode === 0 && !after.stdout.includes(leftover[1]), { exitCode: removed.exitCode, removed: leftover[1] });
+  }
+
   // 7. Unknown host fails fast and clearly.
   const unknownStart = Date.now();
   let unknownMessage = '';

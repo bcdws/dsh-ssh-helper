@@ -6,7 +6,7 @@
  * service restarts, business data deletion, log cleanup — must stay ordinary
  * work on every host.
  */
-import { createPolicy } from '../lib/policy.js';
+import { createPolicy, assertWritePathAllowed } from '../lib/policy.js';
 
 const policy = createPolicy();
 const verdict = (command) => policy.evaluate({ command });
@@ -103,6 +103,54 @@ check('wrapped-substitution', denied('echo $(rm -rf /etc)'), JSON.stringify(verd
 // The guard is intentionally absent from the old admin/data semantics.
 check('no-admin-layer', allowed('reboot') && allowed('visudo') && allowed('crontab -r'), 'admin commands must stay ordinary work');
 check('no-data-layer', allowed('rm -rf /var/lib/mysql') && allowed('psql -c "drop database app"'), 'data deletion is not a guard concern any more');
+
+// ── background logPath is a write target, guarded like the file tools ──────
+// `ssh_run`'s background mode writes a log at a caller-chosen path. Without
+// this check that path reached the remote shell unchecked, so a log could be
+// aimed at a block device or a system tree that `ssh_write` refuses.
+const writeRefused = [
+  ['log-block-device', '/dev/sda'],
+  ['log-boot', '/boot/grub/grub.cfg'],
+  ['log-proc', '/proc/sys/kernel/hostname'],
+  ['log-sys', '/sys/kernel/x']
+];
+for (const [name, path] of writeRefused) {
+  let blocked = null;
+  try {
+    assertWritePathAllowed({ host: 'h', path });
+  } catch (error) {
+    blocked = error;
+  }
+  check(name, blocked !== null && /\[ssh-pool policy\]/.test(blocked.message), String(blocked?.message ?? 'allowed'));
+}
+
+// Ordinary log destinations stay ordinary work: business paths, /var/log, and
+// the plugin's own default directory.
+const writeAllowed = [
+  ['log-var-log', '/var/log/app/app.log'],
+  ['log-srv', '/srv/app/run.log'],
+  ['log-default-dir', '/root/.local/state/dsh-ssh/logs/web-2026-01-01_00-00-00-abc.log'],
+  ['log-home', '/home/deploy/app.log']
+];
+for (const [name, path] of writeAllowed) {
+  let error = null;
+  try {
+    assertWritePathAllowed({ host: 'h', path });
+  } catch (thrown) {
+    error = thrown;
+  }
+  check(`allow-${name}`, error === null, String(error?.message ?? ''));
+}
+
+// A relative path carries no target to judge; the file tools let it through
+// and so does this check (the remote shell resolves it).
+let relativeError = null;
+try {
+  assertWritePathAllowed({ host: 'h', path: 'logs/app.log' });
+} catch (thrown) {
+  relativeError = thrown;
+}
+check('allow-log-relative', relativeError === null, String(relativeError?.message ?? ''));
 
 console.log(`${pass}/${pass + failures.length} passed`);
 for (const failure of failures) console.log(`FAIL ${failure}`);
