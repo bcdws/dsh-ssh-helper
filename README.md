@@ -56,7 +56,7 @@ dsh plugin --profile <profile> add "link:$PWD"
 
 `-l` 加载 PATH（nvm/mise 等），`cd ~` 让 `localPath` 的相对路径落在 WSL 里，`exec` 让客户端能直接结束 node 进程。
 
-**更新**：推到 `main` 且 CI 全绿后 `stable` 自动前进，下次启动 server 即生效。要固定版本，把 `#stable` 换成 tag（如 `#v0.6.0`）。
+**更新**：推到 `main` 且 CI 全绿后 `stable` 自动前进，下次启动 server 即生效。要固定版本，把 `#stable` 换成 tag（如 `#v0.7.0`）。
 
 **启动速度**：server 本身启动不到 0.1 秒，慢在 npx。`github:` 写法每次启动都要先查询 GitHub，实测约 3.5 秒，`stable` 刚更新后约 9 秒，网络或代理慢时更久；换成 tag 或加 `--offline` 也省不掉这一步。想秒开就装一次，用装好的命令启动，代价是不再自动更新：
 
