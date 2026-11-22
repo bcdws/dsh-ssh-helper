@@ -13,9 +13,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { createMcpSession, ERROR_META_KEY, SUPPORTED_PROTOCOL_VERSIONS } from '../mcp/server.js';
+import { createMcpSession, ERROR_META_KEY, SUPPORTED_PROTOCOL_VERSIONS, toMcpResult, toMcpTool } from '../mcp/server.js';
 import { createSamplingBackend } from '../mcp/sampling.js';
+import { createStandaloneRuntime, defaultCallCapFor, SHORT_CLIENT_CALL_CAP_MS } from '../mcp/runtime.js';
 import { createSideAnalyzer } from '../lib/analysis.js';
+import { createTools } from '../lib/tools.js';
 
 let pass = 0;
 const failures = [];
@@ -279,6 +281,219 @@ function makeSession(tools, capabilities = {}, options = {}) {
   gate.w2();
   gate.r();
   await Promise.all([first, second, third]);
+}
+
+// Non-concurrency-safe calls queue per target file: another file (or host)
+// does not wait, the same file (spelled differently) does.
+{
+  const order = [];
+  const gate = {};
+  const write = {
+    name: 'write',
+    description: 'write',
+    parameters: { type: 'object', properties: {} },
+    isConcurrencySafe: () => false,
+    output: { schema: output, render: () => [{ type: 'text', text: 'w' }] },
+    execute: async (args) => {
+      order.push(`start:${args.tag}`);
+      await new Promise((resolve) => (gate[args.tag] = resolve));
+      return { ok: true };
+    }
+  };
+  const { session, init } = makeSession([write]);
+  await init();
+  const call = (id, host, path, tag) => session.receive({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'write', arguments: { host, path, tag } } });
+  const calls = [call(1, 'alpha', '/etc/app.conf', 'a1'), call(2, 'alpha', '/etc/./app.conf', 'a2'), call(3, 'alpha', '/etc/other.conf', 'b'), call(4, 'beta', '/etc/app.conf', 'c')];
+  await sleep(5);
+  check('exclusive-other-files-run', ['start:a1', 'start:b', 'start:c'].every((step) => order.includes(step)), order.join(','));
+  check('exclusive-same-file-waits', !order.includes('start:a2'), order.join(','));
+  gate.a1();
+  await sleep(5);
+  check('exclusive-same-file-next', order.includes('start:a2'), order.join(','));
+  gate.a2();
+  gate.b();
+  gate.c();
+  await Promise.all(calls);
+}
+
+// Progress messages quote the latest output line: redacted, without escape
+// codes, a `\r` progress bar at its current state.
+{
+  let release;
+  let feed;
+  const streaming = {
+    name: 'stream',
+    description: 'streams output',
+    parameters: { type: 'object', properties: {} },
+    output: { schema: output, render: () => [{ type: 'text', text: 'done' }] },
+    execute: (_args, call) =>
+      new Promise((resolve) => {
+        feed = call.onOutput;
+        release = () => resolve({ ok: true });
+      })
+  };
+  const { session, sent, init } = makeSession([streaming], {}, { progressIntervalMs: 20 });
+  await init();
+  const running = session.receive({ jsonrpc: '2.0', id: 21, method: 'tools/call', params: { name: 'stream', arguments: {}, _meta: { progressToken: 'tok-2' } } });
+  await sleep(0);
+  check('progress-feed-given', typeof feed === 'function', 'a call with a progressToken must get onOutput');
+  feed('stdout', 'step 1\nusing token=abcdef123456 now\n');
+  await sleep(40);
+  const quoted = sent.filter((message) => message.method === 'notifications/progress').at(-1)?.params.message ?? '';
+  check('progress-quotes-line', quoted.startsWith('stream: still running') && quoted.includes(' · using token=<redacted:token> now'), quoted);
+  feed('stdout', '\x1b[32mdownload\x1b[0m 10%\r50%\r75%');
+  await sleep(40);
+  const bar = sent.filter((message) => message.method === 'notifications/progress').at(-1)?.params.message ?? '';
+  check('progress-bar-state', bar.endsWith(' · 75%'), bar);
+  feed('stderr', `${'x'.repeat(400)}\n`);
+  await sleep(40);
+  const long = sent.filter((message) => message.method === 'notifications/progress').at(-1)?.params.message ?? '';
+  check('progress-line-clipped', long.length < 220 && long.endsWith('…'), String(long.length));
+  release();
+  await running;
+
+  // Without a progressToken there is nothing to report to: no listener.
+  let plainFeed = 'unset';
+  const plain = makeSession([{ ...streaming, execute: async (_args, call) => ((plainFeed = call.onOutput), { ok: true }) }]);
+  await plain.init();
+  await plain.session.receive({ jsonrpc: '2.0', id: 22, method: 'tools/call', params: { name: 'stream', arguments: {} } });
+  check('progress-no-token-no-feed', plainFeed === undefined, String(plainFeed));
+}
+
+/** The structural part of JSON Schema the lean output must satisfy. */
+function violations(schema, value, at = '$') {
+  if (schema === undefined || schema === null) return [];
+  const typeOk = (node, candidate) => {
+    if (node.type === undefined) return true;
+    if (node.type === 'null') return candidate === null;
+    if (node.type === 'object') return candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate);
+    if (node.type === 'array') return Array.isArray(candidate);
+    if (node.type === 'number' || node.type === 'integer') return typeof candidate === 'number';
+    return typeof candidate === node.type;
+  };
+  if (Array.isArray(schema.oneOf)) {
+    const branch = schema.oneOf.find((node) => typeOk(node, value));
+    return branch === undefined ? [`${at}: no oneOf branch fits`] : violations(branch, value, at);
+  }
+  if (!typeOk(schema, value)) return [`${at}: expected ${schema.type}`];
+  const found = [];
+  if (schema.type === 'object') {
+    for (const key of schema.required ?? []) if (!(key in value)) found.push(`${at}.${key}: required`);
+    for (const [key, child] of Object.entries(value)) {
+      const sub = schema.properties?.[key];
+      if (sub === undefined) {
+        if (schema.additionalProperties === false) found.push(`${at}.${key}: not allowed`);
+      } else found.push(...violations(sub, child, `${at}.${key}`));
+    }
+  }
+  if (schema.type === 'array' && schema.items !== undefined) value.forEach((entry, index) => found.push(...violations(schema.items, entry, `${at}[${index}]`)));
+  return found;
+}
+
+/** A pool double: one host, never connects. */
+const stubPool = (status = []) => ({
+  aliases: ['h1'],
+  warnings: [],
+  has: (alias) => alias === 'h1',
+  hostVisible: () => true,
+  outputLimit: () => 16000,
+  connection: () => ({ connected: false, ensure: async () => {}, session: () => ({ run: async () => ({}) }), exec: async () => ({}) }),
+  status: () => status,
+  connections: () => []
+});
+
+// structuredContent is lean (no null/false fields, no deadline arithmetic
+// unless the deadline was hit) and still matches the advertised outputSchema.
+{
+  const idleHost = { alias: 'h1', host: '192.0.2.10', port: 22, user: 'root', keyName: null, source: 'ssh-config', state: 'idle', connected: false, connectedSeconds: 0, idleSeconds: null, connects: 0, reconnects: 0, failures: 0, handshakeTimeouts: 0, retryPaused: false, commands: 0, lastCommand: null, lastCommandAgeSeconds: null, lastCommandSeconds: null, callFailures: 0, lastFailure: null, sessions: [], hostKey: null, lastError: null, hidden: false, prod: false, remark: '', idleTimeoutMs: null, effectiveIdleTimeoutMs: 0 };
+  const tools = new Map(createTools(stubPool([idleHost]), { defaultTimeoutMs: 60000 }, {}).map((tool) => [tool.name, tool]));
+  const run = tools.get('ssh_run');
+  const runSchema = toMcpTool(run).outputSchema;
+  check('lean-schema-relaxed', ['timedOut', 'aborted', 'sessionEnded', 'handshakeMs', 'reused', 'stderr', 'analysis', 'analysisError'].every((key) => !runSchema.required.includes(key)) && ['host', 'mode', 'stdout'].every((key) => runSchema.required.includes(key)), JSON.stringify(runSchema.required));
+  check('lean-schema-nested', JSON.stringify(runSchema.properties.stdout.required) === '["text"]', JSON.stringify(runSchema.properties.stdout));
+  check('lean-schema-original-kept', run.output.schema.required.includes('timedOut'), 'the shared tool schema must stay as it is (DSH uses it)');
+  const base = { host: 'h1', mode: 'exec', session: null, exitCode: 0, signal: null, timedOut: false, aborted: false, detached: false, sessionEnded: false, endReason: null, timeoutMs: 15000, estimateMs: 5000, multiplier: 3, deadlineSource: 'inferred', stdout: { text: 'ok\n', truncated: false }, stderr: { text: '', truncated: false }, cwd: null, durationMs: 12, handshakeMs: 0, reused: true, pid: null, logPath: null, scriptPath: null, hint: null, analysis: null, analysisError: null };
+  const ok = toMcpResult(run, { host: 'h1', command: 'true' }, base).structuredContent;
+  check('lean-run-value', JSON.stringify(ok) === '{"host":"h1","mode":"exec","exitCode":0,"timeoutMs":15000,"stdout":{"text":"ok\\n"},"durationMs":12}', JSON.stringify(ok));
+  check('lean-run-conforms', violations(runSchema, ok).length === 0, violations(runSchema, ok).join('; '));
+  const hit = toMcpResult(run, { host: 'h1', command: 'sleep 99' }, { ...base, timedOut: true, exitCode: null, stderr: { text: 'boom', truncated: false } }).structuredContent;
+  check('lean-run-timeout-keeps-deadline', hit.timedOut === true && hit.estimateMs === 5000 && hit.multiplier === 3 && hit.stderr?.text === 'boom' && !('exitCode' in hit), JSON.stringify(hit));
+  check('lean-run-timeout-conforms', violations(runSchema, hit).length === 0, violations(runSchema, hit).join('; '));
+  check('lean-text-unchanged', toMcpResult(run, { host: 'h1', command: 'true' }, base).content[0].text === 'ok\n', 'the text content must not change');
+
+  const hosts = tools.get('ssh_hosts');
+  const listed = await hosts.execute({}, { callerId: 'mcp:t' });
+  const lean = toMcpResult(hosts, {}, listed).structuredContent;
+  check('lean-hosts-entry', JSON.stringify(lean.hosts[0]) === '{"alias":"h1","host":"192.0.2.10","port":22,"user":"root","source":"ssh-config","state":"idle"}', JSON.stringify(lean.hosts[0]));
+  check('lean-hosts-conforms', violations(toMcpTool(hosts).outputSchema, lean).length === 0, violations(toMcpTool(hosts).outputSchema, lean).join('; '));
+  const busy = { ...idleHost, state: 'connected', connected: true, connects: 2, commands: 5, remark: '主库' };
+  const busyLean = toMcpResult(hosts, {}, { ...listed, hosts: [busy] }).structuredContent.hosts[0];
+  check('lean-hosts-keeps-facts', busyLean.connected === true && busyLean.connects === 2 && busyLean.commands === 5 && busyLean.remark === '主库' && !('reconnects' in busyLean), JSON.stringify(busyLean));
+}
+
+// The full [policy] text comes once per caller, and again after a refusal;
+// without the option (DSH) every ssh_hosts result carries it.
+{
+  const oneHost = [{ alias: 'h1', host: '192.0.2.10', port: 22, user: 'root', state: 'idle', connected: false, connects: 0, idleSeconds: null }];
+  const tools = new Map(createTools(stubPool(oneHost), { defaultTimeoutMs: 60000 }, { policyOncePerCaller: true }).map((tool) => [tool.name, tool]));
+  const hosts = tools.get('ssh_hosts');
+  const hint = async (callerId) => (await hosts.execute({}, { callerId })).policyHint;
+  const first = await hint('mcp:a');
+  const second = await hint('mcp:a');
+  check('policy-first-full', first.length > 100 && /唯一门禁/.test(first), first.slice(0, 60));
+  check('policy-repeat-brief', second.startsWith('unchanged;') && second.length < first.length, second);
+  check('policy-repeat-marker', /\[policy\] unchanged/.test(hosts.output.render({}, await hosts.execute({}, { callerId: 'mcp:a' }))[0].text), 'the [policy] marker must stay');
+  check('policy-other-caller-full', (await hint('mcp:b')) === first, 'each caller gets the full text once');
+  const refused = await tools.get('ssh_run').execute({ host: 'h1', command: 'rm -rf /etc' }, { callerId: 'mcp:a' }).then(() => null, (error) => error);
+  check('policy-refused', refused?.failureCode === 'policy_denied', String(refused?.message));
+  check('policy-full-after-refusal', (await hint('mcp:a')) === first, 'a refusal must bring the full text back');
+  check('policy-brief-again', (await hint('mcp:a')).startsWith('unchanged;'), 'then brief again');
+
+  const dshTools = new Map(createTools(stubPool(), { defaultTimeoutMs: 60000 }, {}).map((tool) => [tool.name, tool]));
+  const dshHint = async () => (await dshTools.get('ssh_hosts').execute({}, { callerId: 'agent-1' })).policyHint;
+  check('policy-dsh-always-full', (await dshHint()) === first && (await dshHint()) === first, 'DSH keeps the full text on every call');
+}
+
+// ssh_run hands the call's onOutput to the pool, stateless and in a session.
+{
+  const seen = [];
+  const result = { stdout: 'x', stderr: '', exitCode: 0, timedOut: false };
+  const pool = {
+    ...stubPool(),
+    connection: () => ({
+      connected: true,
+      ensure: async () => {},
+      exec: async (_command, options) => (seen.push(options.onOutput), result),
+      session: () => ({ run: async (_command, options) => (seen.push(options.onOutput), result) })
+    })
+  };
+  const run = createTools(pool, { defaultTimeoutMs: 60000 }, {}).find((tool) => tool.name === 'ssh_run');
+  const listener = () => {};
+  await run.execute({ host: 'h1', command: 'make' }, { callerId: 'mcp:x', onOutput: listener });
+  await run.execute({ host: 'h1', command: 'make', session: true }, { callerId: 'mcp:x', onOutput: listener });
+  check('run-passes-on-output', seen.length === 2 && seen.every((entry) => entry === listener), String(seen.length));
+}
+
+// The per-call cap defaults by client: ~60 s clients get one, others do not,
+// and an explicit maxCallMs (0 included) always wins.
+{
+  check('cap-codex', defaultCallCapFor({ name: 'codex-mcp-client' }) === SHORT_CLIENT_CALL_CAP_MS, String(defaultCallCapFor({ name: 'codex-mcp-client' })));
+  check('cap-claude-desktop', defaultCallCapFor({ name: 'claude-ai' }) === SHORT_CLIENT_CALL_CAP_MS, String(defaultCallCapFor({ name: 'claude-ai' })));
+  check('cap-cursor', defaultCallCapFor({ name: 'cursor-vscode' }) === SHORT_CLIENT_CALL_CAP_MS, String(defaultCallCapFor({ name: 'cursor-vscode' })));
+  check('cap-claude-code', defaultCallCapFor({ name: 'claude-code' }) === 0 && defaultCallCapFor(null) === 0, String(defaultCallCapFor({ name: 'claude-code' })));
+  const quietLogger = { info: () => {}, warn: () => {} };
+  const capAfterInit = async (config, name) => {
+    const runtime = createStandaloneRuntime({ config: { sshConfigPath: sshConfig, ...config }, logger: quietLogger });
+    const session = runtime.createSession(() => {});
+    await session.receive({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name } } });
+    const cap = runtime.config.maxCallMs;
+    runtime.dispose();
+    return cap;
+  };
+  check('cap-runtime-default', (await capAfterInit({}, 'codex-mcp-client')) === SHORT_CLIENT_CALL_CAP_MS, 'codex must get the default cap');
+  check('cap-runtime-off', (await capAfterInit({}, 'claude-code')) === 0, 'claude-code must stay uncapped');
+  check('cap-explicit-zero-wins', (await capAfterInit({ maxCallMs: 0 }, 'codex-mcp-client')) === 0, 'an explicit 0 must win');
+  check('cap-explicit-wins', (await capAfterInit({ maxCallMs: 20000 }, 'codex-mcp-client')) === 20000, 'an explicit value must win');
 }
 
 // Sampling: the analyzer round-trips through the client.

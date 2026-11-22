@@ -31,7 +31,7 @@ dsh plugin --profile <profile> add "link:$PWD"
 
 可选参数：`--config <file.json>`（`hosts`、`exclude`、`autoConnect` 等）、`--ssh-config <path>`、`--state <path>`、`--max-call-ms <n>`（见下）、`--no-control`、`--quiet`。
 
-**客户端超时（`--max-call-ms`）**：有的客户端等一个工具调用最多几十秒（magpie 是 50 秒），超时就放弃并取消调用，agent 拿不到任何输出。把 `--max-call-ms` 设得比客户端超时少几秒即可，默认 0 不启用：
+**客户端超时（`--max-call-ms`）**：有的客户端等一个工具调用最多几十秒（magpie 是 50 秒），超时就放弃并取消调用，agent 拿不到任何输出。把 `--max-call-ms` 设得比客户端超时少几秒即可。不传时按 `initialize` 里的客户端名决定：已知约 60 秒就放弃的客户端（Codex、Claude Desktop、Cursor）默认 50000，其他客户端默认 0（不启用）。显式传值（包括 0）总是优先：
 
 ```json
 "args": ["-y", "github:bcdws/dsh-ssh-helper#stable", "--max-call-ms", "45000"]
@@ -46,7 +46,7 @@ dsh plugin --profile <profile> add "link:$PWD"
 - 这只是兜底：已知会跑很久的任务（构建、升级、备份）直接用 `background: true`，立刻返回并写日志。
 - DSH 插件没有客户端超时的问题，不需要设。
 
-另外两条与超时有关的行为：到了截止时间或被客户端取消的命令，插件会连同它起的子进程一起杀掉，约 2 秒内返回；请求带了 `progressToken` 的长调用，每 10 秒会收到一次进度通知，支持的客户端会据此重新计时（magpie 不会）。
+另外两条与超时有关的行为：到了截止时间或被客户端取消的命令，插件会连同它起的子进程一起杀掉，约 2 秒内返回；请求带了 `progressToken` 的长调用，每 10 秒会收到一次进度通知，附带命令最新的一行输出（已脱敏，最长 160 字符），支持的客户端会据此重新计时（magpie 不会）。
 
 主机和密钥在 WSL 里、客户端在 Windows 上时，让 server 在 WSL 里跑：
 
@@ -98,6 +98,8 @@ npx -y github:bcdws/dsh-ssh-helper#stable panel --open
 
 - **后台模式留下的文件**：`background: true` 会在服务器上留两个文件，结果里都会返回路径：日志（`logPath`）和隐藏脚本 `.dsh-ssh-run-<hash>.sh`（`scriptPath`，存放命令正文，权限 700）。脚本总在插件的日志目录 `~/.local/state/dsh-ssh/logs/`（可用 `DSH_SSH_LOG_DIR` 改），即使用 `logPath` 把日志放到了别处。插件不会删除这两个文件。
 - **生产标记和备注**：只提醒、不拦截。对生产主机做修改类调用时，结果会带 `[PROD]` 提醒；有备注的主机，每次调用结果都会带 `[note]`。MCP 下两者也会放进结构化结果的 `notices` 字段。
+- **MCP 结构化结果**：`structuredContent` 不放没有信息量的字段：值为 null 或 false 的字段、为 0 的主机计数，以及 `ssh_run` 的握手耗时、连接复用标记和截止时间推算（命令超时时保留推算）。`outputSchema` 的 `required` 相应放宽，文本内容不变。
+- **MCP 下的 `[policy]`**：`initialize` 的说明里一直有完整规则；`ssh_hosts` 只在第一次调用和命令被拒之后给出全文，其他时候只留一行 `[policy] unchanged…`。DSH 插件每次都给全文。
 - **错误码**：失败时末尾附 `[error: <code>] 下一步建议`，MCP 下也放在 `_meta["dsh-ssh-helper/error"]`。错误码有：`connect_timeout`、`connection_refused`、`closed_before_handshake`、`host_unreachable`、`auth_failed`、`key_unusable`、`host_key_mismatch`、`transport_lost`、`exec_timeout`、`cancelled`、`policy_denied`、`unknown_host`、`local_path`、`invalid_argument`。失败会记到主机的 `lastFailure`。
 
 ## 安全边界

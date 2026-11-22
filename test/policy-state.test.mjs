@@ -1,11 +1,10 @@
 /**
  * The guard's own decision and its model-facing denial must agree.
  *
- * There is no per-host switch any more: `denyMessage` names the host and the
+ * There is no per-host switch any more: `formatDenial` names the host and the
  * rule without a tier, and points at `ssh_hosts` for the policy hints.
  */
-import { createPolicy } from '../lib/policy.js';
-import { denyMessage } from '../index.js';
+import { createPolicy, formatDenial } from '../lib/policy.js';
 
 const policy = createPolicy();
 
@@ -14,7 +13,7 @@ const failures = [];
 const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: ${detail}`));
 
 const denial = policy.evaluate({ alias: 'prod', command: 'rm -rf /etc' });
-const text = denyMessage(denial, 'prod');
+const text = formatDenial(denial, 'prod');
 check('denial-names-host', /主机 prod/.test(text), text);
 check('denial-names-rule', /danger\.rm-root/.test(text), text);
 check('denial-no-tier', !/档位|完全档|生产档/.test(text), text);

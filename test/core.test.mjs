@@ -112,7 +112,9 @@ const CONFIG = { maxOutputBytes: 32768, defaultTimeoutMs: 30000 };
 {
   const signal = new AbortController().signal;
   const context = callContext({ callerId: 'agent-1', signal, agent: { id: 'ignored' } });
-  check('context-fields', context.callerId === 'agent-1' && context.signal === signal && Object.keys(context).length === 2, JSON.stringify(Object.keys(context)));
+  check('context-fields', context.callerId === 'agent-1' && context.signal === signal && context.onOutput === undefined && Object.keys(context).sort().join(',') === 'callerId,onOutput,signal', JSON.stringify(Object.keys(context)));
+  const listener = () => {};
+  check('context-on-output', callContext({ onOutput: listener }).onOutput === listener && callContext({ onOutput: 'x' }).onOutput === undefined, 'onOutput must be a function or undefined');
   check('context-frozen', Object.isFrozen(context), 'context must be immutable');
   check('context-default-caller', callContext().callerId === LOCAL_CALLER && callContext({ callerId: '' }).callerId === LOCAL_CALLER, callContext().callerId);
   check('context-bad-signal', callContext({ signal: { aborted: false } }).signal === undefined, 'a non-AbortSignal must be dropped');

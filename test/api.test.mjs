@@ -1,5 +1,5 @@
 /** Assistant API: routing, loopback gate, write credential (header or cookie), and mutations. */
-import { createAssistantApi } from '../dsh/api.js';
+import { createAssistantApi } from '../lib/assistant-api.js';
 
 const calls = [];
 const settingsNotices = [];

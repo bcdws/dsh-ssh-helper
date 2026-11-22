@@ -408,9 +408,39 @@ check('idle-after-work', busy.busy === false, String(busy.busy));
   check('detach-late-end', ended?.exitCode === 0 && ended.stdout === 'step 1\nstep 2\n' && raw.busy === false, JSON.stringify(ended));
 }
 
+// onOutput sees the command's own output as it arrives — never the PID
+// marker — and a listener that throws changes nothing.
+{
+  const raw = makeConnection();
+  connections.push(raw);
+  raw.ensure = async () => ({
+    exec: (_command, callback) => {
+      const channel = channelFor('');
+      setImmediate(() => {
+        callback(null, channel);
+        channel.stderr.emit('data', Buffer.from('\x1eDSH 4242 98765\nwarn 1\n'));
+        channel.emit('data', Buffer.from('line 1\n'));
+        channel.emit('data', Buffer.from('line 2\n'));
+        channel.emit('close', 0);
+      });
+    }
+  });
+  const seenOutput = [];
+  const result = await raw.exec('build', { timeoutMs: 1000, onOutput: (stream, text) => seenOutput.push(`${stream}:${text}`) });
+  check('on-output-streams', seenOutput.join('|') === 'stderr:warn 1\n|stdout:line 1\n|stdout:line 2\n', JSON.stringify(seenOutput));
+  check('on-output-result-unchanged', result.stdout === 'line 1\nline 2\n' && result.stderr === 'warn 1\n', JSON.stringify(result));
+  const throwing = await raw.exec('build', {
+    timeoutMs: 1000,
+    onOutput: () => {
+      throw new Error('listener bug');
+    }
+  });
+  check('on-output-throw-ignored', throwing.exitCode === 0 && throwing.stdout === 'line 1\nline 2\n', JSON.stringify(throwing));
+}
+
 // ssh2 cuts data at packet boundaries: a multi-byte UTF-8 character split
-// across two chunks must decode whole on stdout, stderr and the session
-// trailer — never as U+FFFD replacement characters.
+// across two chunks must decode whole on stdout, stderr, the session trailer
+// and onOutput — never as U+FFFD replacement characters.
 {
   const zh = Buffer.from('中'); // e4 b8 ad
   /** Two chunks: `before` plus the first `at` bytes of 中, then the rest plus `after`. */
@@ -432,9 +462,11 @@ check('idle-after-work', busy.busy === false, String(busy.busy));
 
   // The stderr split lands right after the PID marker line, in the same chunk.
   script = [...split('\x1eDSH 4242 98765\nwarn ', 1, '\n').map((chunk) => ['stderr', chunk]), ...split('log ', 2, '\n').map((chunk) => ['stdout', chunk])];
-  const plain = await raw.exec('tail app.log', { timeoutMs: 1000 });
+  const seenOutput = [];
+  const plain = await raw.exec('tail app.log', { timeoutMs: 1000, onOutput: (stream, text) => seenOutput.push(`${stream}:${text}`) });
   check('utf8-split-stdout', whole(plain.stdout) && plain.stdout === 'log 中\n', JSON.stringify(plain.stdout));
   check('utf8-split-stderr', whole(plain.stderr) && plain.stderr === 'warn 中\n', JSON.stringify(plain.stderr));
+  check('utf8-split-on-output', whole(seenOutput.join('')) && seenOutput.join('|') === 'stderr:warn |stderr:中\n|stdout:log |stdout:中\n', JSON.stringify(seenOutput));
 
   const trailerMarker = '\n\x1eDSH_STATE_0123456789abcdef\n';
   script = split(`\x1eDSH 4242 98765\nnote${trailerMarker}cwd=/srv/`, 2).map((chunk) => ['stderr', chunk]);

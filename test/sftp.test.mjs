@@ -1,5 +1,4 @@
 /** SFTP open must settle even when the remote side never answers. */
-import { EventEmitter } from 'node:events';
 import { openSftp } from '../lib/sftp.js';
 
 const keepAlive = setTimeout(() => {}, 1000);

@@ -46,7 +46,7 @@ scripts/pack-smoke.mjs   打包冒烟：npm pack → 装 tarball → initialize
 ```
 
 - 护栏必须留在工具内部：`ssh_run` 里的 `assertCommandAllowed`，以及文件写入用的 `assertWritePathAllowed`。适配层可以再加拦截，但不能替代这两处。
-- 工具只读取中立的调用上下文 `{ callerId, signal }`（`lib/call-context.js`），由各适配层自己转换。
+- 工具只读取中立的调用上下文 `{ callerId, signal, onOutput }`（`lib/call-context.js`），由各适配层自己转换。`onOutput(stream, text)` 可选，只用来报告进度（MCP 适配层把最新一行放进进度通知），不能影响命令本身或返回结果。
 - MCP 进程的 stdout 只能输出协议消息，日志一律写 stderr。
 - MCP server 进程从不写状态文件：默认只读跟随 `~/.dsh-ssh-mcp/state.json`，传了 `--state` 才改为跟随别的文件（比如 DSH 的）。这个文件唯一的写入方是 `dsh-ssh-mcp panel`，面板从不写 DSH 的 `state.json`。
 - 面板 API 只有一份，就是 `lib/assistant-api.js`：DSH 挂在 `/ssh-pool`，MCP 面板挂在 `/api`，并打开 `checkHost`。新增一个面板功能时，两个面板都要考虑到。

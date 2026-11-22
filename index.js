@@ -18,7 +18,7 @@
 import { buildHostTable, normalizeConfig } from './lib/config.js';
 import { MetadataStore } from './lib/store.js';
 import { createPolicy, formatDenial } from './lib/policy.js';
-import { createAssistantApi } from './dsh/api.js';
+import { createAssistantApi } from './lib/assistant-api.js';
 import { SshPool } from './lib/pool.js';
 import { createTools } from './lib/tools.js';
 import { fromDshExecution } from './lib/call-context.js';
@@ -30,9 +30,6 @@ import { createChangeRefresher, createHostRefresher } from './lib/host-refresh.j
 
 export const name = 'ssh-pool';
 export const inject = ['tools'];
-
-/** The model-facing denial for a policy verdict (kept for existing importers). */
-export const denyMessage = formatDenial;
 
 /**
  * Adapt a neutral tool to the DSH registry: DSH hands `execute` its own
@@ -187,7 +184,7 @@ export function apply(ctx, config = {}) {
           outcome: 'denied',
           reason: 'policy'
         });
-        return denyMessage(verdict, args.host);
+        return formatDenial(verdict, args.host);
       }
       return undefined;
     });

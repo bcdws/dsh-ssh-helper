@@ -26,19 +26,37 @@ import { mcpRunDir, mcpStatePath } from './home.js';
 
 const PACKAGE = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-/** Usage notes returned by `initialize`; clients surface them to the model. */
+/**
+ * Usage notes returned by `initialize`; clients surface them to the model.
+ * The tool descriptions carry the details, so this only orders the work and
+ * carries the policy, which `ssh_hosts` then repeats only when needed.
+ */
 function instructionsFor(policy) {
   return [
     'SSH tools over a persistent connection pool (one SSH connection per host, reused by every call).',
-    '- Call ssh_hosts first to see host aliases; hosts come from ~/.ssh/config (key/agent auth only).',
-    '- ssh_run: pass `session` to keep cwd/exported variables across calls; give `expectedMs` for slow work (build, deploy, backup) instead of a long `timeoutMs`; use `background: true` for daemons and never append "&" yourself.',
-    '- Prefer ssh_read / ssh_grep / ssh_glob over cat/grep/find in ssh_run; prefer ssh_edit for small changes to an existing file.',
-    '- Output is capped; filter remotely (grep -m, tail -n, journalctl --since) rather than reading whole logs.',
-    '- A guard refuses only machine-destroying commands. If refused, do NOT retry an equivalent rewrite; explain the intent (host, action, expected impact) and let the user decide.',
+    '- Call ssh_hosts first; hosts come from ~/.ssh/config (key/agent auth only).',
+    '- Prefer ssh_read / ssh_grep / ssh_glob over cat/grep/find in ssh_run, and ssh_edit for small changes.',
+    '- ssh_run: `session` keeps cwd and env, `expectedMs` for slow work, `background: true` for daemons (never append "&").',
+    '- If the guard refuses a command, do NOT retry an equivalent rewrite; state the host, the action and its impact, and let the user decide.',
     '',
     '[policy]',
     policy.hints()
   ].join('\n');
+}
+
+/**
+ * Clients that give up on a tool call after about 60 s by default and do not
+ * reset that on progress: Codex (`tool_timeout_sec` = 60), Claude Desktop
+ * (`claude-ai`), Cursor. Matched on `clientInfo.name`.
+ */
+const SHORT_TIMEOUT_CLIENTS = /codex|cursor|^claude-ai$/i;
+/** The per-call cap those clients get unless `--max-call-ms` / `maxCallMs` says otherwise. */
+export const SHORT_CLIENT_CALL_CAP_MS = 50_000;
+
+/** The default per-call cap for a client: answer before it gives up, never kill. */
+export function defaultCallCapFor(clientInfo) {
+  const name = typeof clientInfo?.name === 'string' ? clientInfo.name : '';
+  return SHORT_TIMEOUT_CLIENTS.test(name) ? SHORT_CLIENT_CALL_CAP_MS : 0;
 }
 
 /** A logger that never touches stdout (stdout is the protocol channel). */
@@ -82,12 +100,15 @@ export function createStandaloneRuntime({ config: raw = {}, logger = stderrLogge
   // the tools are built once, so they reach it through this indirection.
   let analyzer = unavailableAnalyzer();
   const diagnostics = createDiagnostics();
+  const policy = createPolicy();
   const tools = createTools(pool, config, {
-    policy: createPolicy(),
+    policy,
     diagnostics,
-    analyzer: { status: () => analyzer.status(), run: (input) => analyzer.run(input) }
+    analyzer: { status: () => analyzer.status(), run: (input) => analyzer.run(input) },
+    // `initialize` already carries the policy; ssh_hosts repeats it only when needed.
+    policyOncePerCaller: true
   });
-  const instructions = instructionsFor(createPolicy());
+  const instructions = instructionsFor(policy);
 
   /** Re-read ~/.ssh/config only when it changed since the last call. */
   const refreshIfChanged = createChangeRefresher({ config, refresh, logger });
@@ -97,6 +118,17 @@ export function createStandaloneRuntime({ config: raw = {}, logger = stderrLogge
   const hiddenTimer = setInterval(watchHidden, 1000);
   hiddenTimer.unref?.();
 
+  // An explicit maxCallMs (config file or --max-call-ms, 0 included) always
+  // wins; otherwise the client that connects picks the default.
+  const capExplicit = raw.maxCallMs !== undefined;
+  const pickCallCap = ({ clientInfo }) => {
+    if (capExplicit) return;
+    config.maxCallMs = defaultCallCapFor(clientInfo);
+    if (config.maxCallMs > 0) {
+      logger.info?.(`client ${clientInfo?.name} gives up on tool calls after about 60 s: ssh_run answers after ${config.maxCallMs}ms (override with --max-call-ms)`);
+    }
+  };
+
   let currentSession = null;
   const createSession = (send) => {
     const session = createMcpSession({
@@ -105,6 +137,7 @@ export function createStandaloneRuntime({ config: raw = {}, logger = stderrLogge
       serverInfo: { name: PACKAGE.name, title: 'DSH SSH helper', version: PACKAGE.version },
       instructions,
       beforeCall: refreshIfChanged,
+      onInitialize: pickCallCap,
       logger
     });
     analyzer = createSideAnalyzer({ backend: createSamplingBackend(session), logger });
@@ -143,6 +176,7 @@ export function createStandaloneRuntime({ config: raw = {}, logger = stderrLogge
           statePath: meta.filePath,
           followsDsh,
           sshConfigPath: config.useSshConfig ? config.sshConfigPath : null,
+          maxCallMs: config.maxCallMs,
           warnings: [...(pool.warnings ?? [])]
         }),
         extraState: () => ({

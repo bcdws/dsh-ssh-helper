@@ -6,11 +6,11 @@
  *   dsh-ssh-mcp [--config <file.json>] [--ssh-config <path>] [--state <path>] [--quiet]
  *   dsh-ssh-mcp panel [--port <n>] [--open] [--config <file.json>] [--ssh-config <path>]
  */
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createStandaloneRuntime, PACKAGE, stderrLogger } from '../mcp/runtime.js';
 import { serveStdio } from '../mcp/stdio.js';
 import { servePanel } from '../mcp/panel.js';
-import { spawn } from 'node:child_process';
 
 /** Best effort: hand the URL to the desktop's opener. */
 function openBrowser(url, logger) {
@@ -47,7 +47,9 @@ Options:
   --max-call-ms <n>    Answer one ssh_run after n ms (connect included) with
                        the output so far; the command is not killed and keeps
                        running to its own deadline. Set it a few seconds under
-                       the client's tool timeout. Default 0 (off). Key: maxCallMs
+                       the client's tool timeout; 0 turns it off. Default 50000
+                       for clients that give up after about 60 s (Codex, Claude
+                       Desktop, Cursor), otherwise 0. Key: maxCallMs
   --no-control         Do not open the loopback control port the panel uses
   --quiet              Only log warnings and errors (stderr)
   -h, --help           Show this help
@@ -175,4 +177,14 @@ if (options.panel) {
   process.on('SIGINT', () => shutdown(130));
   process.on('SIGTERM', () => shutdown(143));
   done.then(() => shutdown(0));
+  // A stray rejection (an ssh2 callback, a command still running past the
+  // per-call cap) must not take every tool down for the rest of the session.
+  process.on('unhandledRejection', (reason) => {
+    logger.error?.(`unhandled rejection: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`);
+  });
+  // The client closed its end of the pipe: nobody is left to answer.
+  process.stdout.on('error', (error) => {
+    if (error?.code !== 'EPIPE') logger.error?.(`stdout: ${error instanceof Error ? error.message : String(error)}`);
+    shutdown(0);
+  });
 }
