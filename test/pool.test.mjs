@@ -408,6 +408,45 @@ check('idle-after-work', busy.busy === false, String(busy.busy));
   check('detach-late-end', ended?.exitCode === 0 && ended.stdout === 'step 1\nstep 2\n' && raw.busy === false, JSON.stringify(ended));
 }
 
+// ssh2 cuts data at packet boundaries: a multi-byte UTF-8 character split
+// across two chunks must decode whole on stdout, stderr and the session
+// trailer — never as U+FFFD replacement characters.
+{
+  const zh = Buffer.from('中'); // e4 b8 ad
+  /** Two chunks: `before` plus the first `at` bytes of 中, then the rest plus `after`. */
+  const split = (before, at, after = '') => [Buffer.concat([Buffer.from(before), zh.subarray(0, at)]), Buffer.concat([zh.subarray(at), Buffer.from(after)])];
+  const whole = (text) => typeof text === 'string' && text.includes('中') && !text.includes('\uFFFD');
+  let script = [];
+  const raw = makeConnection();
+  connections.push(raw);
+  raw.ensure = async () => ({
+    exec: (_command, callback) => {
+      const channel = channelFor('');
+      setImmediate(() => {
+        callback(null, channel);
+        for (const [stream, chunk] of script) (stream === 'stdout' ? channel : channel.stderr).emit('data', chunk);
+        channel.emit('close', 0);
+      });
+    }
+  });
+
+  // The stderr split lands right after the PID marker line, in the same chunk.
+  script = [...split('\x1eDSH 4242 98765\nwarn ', 1, '\n').map((chunk) => ['stderr', chunk]), ...split('log ', 2, '\n').map((chunk) => ['stdout', chunk])];
+  const plain = await raw.exec('tail app.log', { timeoutMs: 1000 });
+  check('utf8-split-stdout', whole(plain.stdout) && plain.stdout === 'log 中\n', JSON.stringify(plain.stdout));
+  check('utf8-split-stderr', whole(plain.stderr) && plain.stderr === 'warn 中\n', JSON.stringify(plain.stderr));
+
+  const trailerMarker = '\n\x1eDSH_STATE_0123456789abcdef\n';
+  script = split(`\x1eDSH 4242 98765\nnote${trailerMarker}cwd=/srv/`, 2).map((chunk) => ['stderr', chunk]);
+  const session = await raw.exec('pwd', { timeoutMs: 1000, trailerMarker });
+  check('utf8-split-trailer', whole(session.trailer) && session.trailer === 'cwd=/srv/中' && session.stderr === 'note', JSON.stringify(session));
+
+  // A character the stream never finishes is flushed at close, not dropped.
+  script = [['stdout', Buffer.concat([Buffer.from('cut '), zh.subarray(0, 2)])]];
+  const truncated = await raw.exec('head -c 6 app.log', { timeoutMs: 1000 });
+  check('utf8-unfinished-tail-flushed', truncated.stdout === 'cut \uFFFD', JSON.stringify(truncated.stdout));
+}
+
 for (const connection of connections) connection.dispose();
 console.log(`${pass}/${pass + failures.length} passed`);
 for (const failure of failures) console.log(`FAIL ${failure}`);
