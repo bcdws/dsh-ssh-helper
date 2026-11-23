@@ -19,7 +19,7 @@ import {
   moveAlias,
   renderBanners,
   renderDiagnostics,
-  renderHostCard,
+  renderHostRow,
   renderEditDialog,
   renderFooter,
   renderHeader,
@@ -28,6 +28,7 @@ import {
   renderSettings,
   renderTab,
   renderTabs,
+  sortTarget,
   tabsFor
 } from '../ui/panel-view.js';
 
@@ -41,7 +42,7 @@ const web = {
   state: 'ready', connected: true, connectedSeconds: 3660, idleSeconds: 5, connects: 3, reconnects: 1,
   failures: 0, handshakeTimeouts: 0, sessions: [{ name: 'main', ownerShort: 'dsh', commands: 3, idleSeconds: 20 }],
   commands: 3, hidden: false, remark: '生产 Web', idleTimeoutMs: null, effectiveIdleTimeoutMs: 30000,
-  hostKey: { status: 'trusted', type: 'ssh-ed25519' }, lastCommand: 'uptime', lastCommandAgeSeconds: 5,
+  hostKey: { status: 'match', type: 'ssh-ed25519' }, lastCommand: 'uptime', lastCommandAgeSeconds: 5,
   callFailures: 0, lastFailure: null, instances: [{ pid: 111, state: 'ready', connected: true }]
 };
 const db = {
@@ -103,56 +104,69 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   check('tabs-mcp', count(tabsMcp, 'role="tab"') === 4 && /class="tab on" aria-selected="true" data-tab="processes"/.test(tabsMcp), tabsMcp);
 }
 
-// ── host cards: everything visible, no side panel ──────────────────────────
+// ── hosts table: one row per host, details on demand ───────────────────────
 {
   const html = renderHosts(dsh, { mode: 'dsh' });
-  check('host-cards', count(html, 'class="host"') === 2 && html.includes('class="hosts"'), `${count(html, 'class="host"')} cards`);
+  const open = renderHosts(dsh, { mode: 'dsh', expanded: ['web', 'db'] });
+  check('host-rows', count(html, '<article class="host') === 2 && html.includes('class="host-table"') && html.includes('class="hosts"'), `${count(html, '<article class="host')} rows`);
   check('no-side-panel', !html.includes('drawer') && !html.includes('data-select="') && !html.includes('class="row"'), 'the list must not open a side panel');
-  check('card-identity', html.includes('data-alias="web"') && html.includes('data-alias="db"') && html.includes('class="badge muted"'), 'identity and badges');
-  check('card-address', html.includes('root@192.0.2.10:22') && html.includes('deploy@192.0.2.11:2222'), 'address line');
-  const masked = renderHosts({ ...dsh, settings: { ...settings, maskAddresses: true } }, { mode: 'dsh' });
-  check('card-address-masked', masked.includes('class="mosaic"') && !masked.includes('192.0.2.10') && !masked.includes('deploy@'), 'mask switch hides endpoints behind a mosaic');
+  const headings = [...html.matchAll(/<span role="columnheader">([^<]*)<\/span>/g)].map((match) => match[1]);
+  const c = TEXT.columns;
+  check('host-columns', headings.join(',') === [c.host, c.address, c.key, c.hostKey, c.state, c.visible, c.idle, c.remark].join(','), headings.join(','));
+  check('row-cells', count(renderHostRow(web, { state: dsh, mode: 'dsh' }), '<div class="cell') === 8 && count(renderHostRow(db, { state: dsh, mode: 'dsh' }), '<div class="cell') === 8, 'every row has the same cells');
+  check('row-identity', html.includes('data-alias="web"') && html.includes('data-alias="db"') && html.includes('class="badge muted"') && html.includes('class="host is-hidden"'), 'identity and badges');
+  check('row-address', html.includes('root@192.0.2.10:22') && html.includes('deploy@192.0.2.11:2222'), 'address cell');
+  const masked = renderHosts({ ...dsh, settings: { ...settings, maskAddresses: true } }, { mode: 'dsh', expanded: ['web', 'db'] });
+  check('row-address-masked', masked.includes('class="mosaic"') && !masked.includes('192.0.2.10') && !masked.includes('deploy@'), 'mask switch hides endpoints behind a mosaic');
   const maskedDialog = renderEditDialog(web, { masked: true });
   check('dialog-address-masked', maskedDialog.includes('class="mosaic"') && !maskedDialog.includes('192.0.2.10') && !renderEditDialog(web).includes('mosaic'), 'dialog follows the switch');
-  check('card-key', html.includes('id_web') && html.includes('—'), 'key names');
-  check('card-host-key', html.includes('trusted · ssh-ed25519'), 'host key');
-  check('card-status', html.includes('已连接 · 已连 1 小时 1 分 · 1 会话 · 3 命令'), 'status line');
-  check('card-counters', html.includes('3 次建连 · 1 次重连'), 'connect counters');
-  check('card-switches', count(html, 'data-toggle data-field="hidden"') === 2 && count(html, 'data-toggle ') === 2, 'per-card switches: only hidden');
-  check('card-no-prod', !html.includes('data-field="prod"') && !html.includes('PROD') && !html.includes('生产服务器'), 'the prod label is gone');
-  check('card-hidden-state', /role="switch" aria-checked="true"[^>]*data-field="hidden" data-alias="db"/.test(html), 'hidden switch states');
-  check('card-inputs', count(html, 'data-meta-input data-field="idleTimeoutMs"') === 2 && count(html, 'data-meta-input data-field="remark"') === 2, 'per-card overrides');
-  check('card-idle-value', /value="60"[^>]*data-field="idleTimeoutMs" data-alias="db"/.test(html), 'idle override in seconds');
-  check('card-remark', html.includes('value="生产 Web"') && html.includes('value="&lt;b&gt;"') && !html.includes('value="<b>"'), 'remark values are escaped');
-  check('card-edit', count(html, 'data-edit=') === 1 && html.includes('data-edit="web"'), 'only ssh-config hosts are editable');
-  check('card-source', html.includes(TEXT.sourceConfig), 'config hosts say where they come from');
-  check('card-failure', html.includes('connect_timeout') && html.includes('handshake timed out') && html.includes('共 2 次') && html.includes('12 秒前'), 'last failed call');
-  check('card-last-error', html.includes('ssh host &quot;db&quot; failed: timeout'), 'connect error also visible');
-  check('card-last-command', html.includes(TEXT.lastCommand) && html.includes('uptime') && html.includes('5 秒前'), 'last command');
-  check('card-sessions', html.includes(TEXT.sessions) && html.includes('main') && html.includes('空闲 20 秒'), 'sessions');
-  check('card-chips', html.includes('1 台隐藏') && !html.includes('台生产'), 'summary chips');
-  check('card-empty', renderHosts({ hosts: [] }, { mode: 'dsh' }).includes(TEXT.noHosts), 'empty state');
-  check('card-note-dsh', html.includes(TEXT.hostsNoteDsh) && !html.includes(TEXT.hostsNoteMcp), 'dsh note');
-  check('card-note-mcp', renderHosts(mcp, { mode: 'mcp' }).includes(TEXT.hostsNoteMcp), 'mcp note');
-  // One skeleton per card: a drag handle, then the same labels in the same order.
-  check('card-drag-handles', count(html, 'data-drag-handle data-alias=') === 2 && html.includes(`aria-label="${TEXT.dragHandle}：web"`), 'every card has a labelled handle');
-  const labelsOf = (card) => [...card.matchAll(/<div class="row-k">([^<]*)<\/div>/g)].map((match) => match[1]);
-  const webLabels = labelsOf(renderHostCard(web, { state: dsh, mode: 'dsh' }));
-  check('card-label-order', webLabels.join(',') === [TEXT.address, TEXT.key, TEXT.hostKey, TEXT.state, TEXT.visibility, TEXT.idleOverride, TEXT.remark, TEXT.lastCommand].join(','), webLabels.join(','));
-  const bare = renderHostCard({ alias: 'bare', host: '192.0.2.20', port: 22, user: 'root', source: 'ssh-config', state: 'idle', sessions: [] }, { state: dsh, mode: 'dsh' });
-  check('card-fixed-part', labelsOf(bare).join(',') === [TEXT.address, TEXT.key, TEXT.hostKey, TEXT.state, TEXT.visibility, TEXT.idleOverride, TEXT.remark].join(','), labelsOf(bare).join(','));
-  check('card-host-key-placeholder', /<div class="row-k">主机密钥<\/div><div class="row-v"><span class="muted">—<\/span>/.test(bare), 'an unknown host key keeps its row');
-  check('card-procs-last', renderHostCard(web, { state: mcp, mode: 'mcp' }).trim().endsWith('</div>\n</article>') && /host-section host-procs[\s\S]*<\/article>$/.test(renderHostCard(web, { state: mcp, mode: 'mcp' }).trim()), 'per-process rows close the card');
-  check('card-order', html.indexOf('data-alias="web"') < html.indexOf('data-alias="db"'), 'hosts keep their order');
+  check('row-key', html.includes('id_web') && html.includes('—'), 'key names');
+  check('row-host-key', html.includes('>一致 <span class="muted small">ed25519</span>') && html.includes(TEXT.hostKeyStates.match[1]), 'host key verdict in words');
+  check('row-host-key-none', html.includes(`title="${TEXT.hostKeyNone}">—`), 'an unknown host key says why');
+  const keyed = (status) => renderHostRow({ ...web, hostKey: { status, type: 'ssh-ed25519' } }, { state: dsh, mode: 'dsh' });
+  check('row-host-key-mismatch', keyed('mismatch').includes('class="hk fail"') && keyed('mismatch').includes('>不一致') && keyed('unknown').includes('>未登记') && keyed('unreadable').includes('>无法核对'), 'every verdict has a label');
+  check('row-status', html.includes('已连接 <span class="muted small">1 小时 1 分 · 1 会话 · 3 命令</span>'), 'state cell');
+  check('row-switches', count(html, 'data-toggle data-field="hidden"') === 2 && count(html, 'data-toggle ') === 2, 'one visibility switch per row');
+  check('row-visible-state', /role="switch" aria-checked="true"[^>]*data-field="hidden" data-alias="web"/.test(html) && /role="switch" aria-checked="false"[^>]*data-field="hidden" data-alias="db"/.test(html), 'the switch is on when the agent can see the host');
+  check('row-no-prod', !html.includes('data-field="prod"') && !html.includes('PROD') && !html.includes('生产服务器'), 'the prod label is gone');
+  check('row-inputs', count(html, 'data-meta-input data-field="idleTimeoutMs"') === 2 && count(html, 'data-meta-input data-field="remark"') === 2, 'per-row overrides');
+  check('row-idle-value', /value="60"[^>]*data-field="idleTimeoutMs" data-alias="db"/.test(html), 'idle override in seconds');
+  check('row-remark', html.includes('value="生产 Web"') && html.includes('value="&lt;b&gt;"') && !html.includes('value="<b>"'), 'remark values are escaped');
+  check('row-edit', count(html, 'data-edit=') === 1 && html.includes('data-edit="web"'), 'only ssh-config hosts are editable');
+  check('row-source', html.includes(TEXT.sourceConfig), 'config hosts say where they come from');
+  check('row-failure-chip', /class="chip err" data-expand="db"[^>]*>失败 ×2</.test(html) && !/data-expand="web"[^>]*class="chip/.test(html), 'a failed host shows a chip that opens its details');
+  check('row-collapsed', !html.includes('host-detail') && count(html, 'aria-expanded="false"') === 2, 'details stay closed until asked');
+  check('row-expanded', count(open, 'class="host-detail"') === 2 && count(open, 'aria-expanded="true"') === 2 && open.includes('class="host open" data-alias="web"'), 'expanded rows show their details');
+  check('detail-counters', open.includes('3 次建连 · 1 次重连') && !html.includes('3 次建连'), 'counters live in the details');
+  check('detail-failure', open.includes('connect_timeout') && open.includes('handshake timed out') && open.includes('共 2 次') && open.includes('12 秒前'), 'last failed call');
+  check('detail-last-error', open.includes('ssh host &quot;db&quot; failed: timeout'), 'connect error also visible');
+  check('detail-last-command', open.includes(TEXT.lastCommand) && open.includes('uptime') && open.includes('5 秒前'), 'last command');
+  check('detail-sessions', open.includes(TEXT.sessions) && open.includes('main') && open.includes('空闲 20 秒') && open.includes(TEXT.noSessions), 'sessions, or a placeholder');
+  check('row-chips', html.includes('1 台隐藏') && !html.includes('台生产'), 'summary chips');
+  check('row-empty', renderHosts({ hosts: [] }, { mode: 'dsh' }).includes(TEXT.noHosts), 'empty state');
+  check('row-note-dsh', html.includes(TEXT.hostsNoteDsh) && !html.includes(TEXT.hostsNoteMcp), 'dsh note');
+  check('row-note-mcp', renderHosts(mcp, { mode: 'mcp' }).includes(TEXT.hostsNoteMcp), 'mcp note');
+  check('row-drag-handles', count(html, 'data-drag-handle data-alias=') === 2 && html.includes(`aria-label="${TEXT.dragHandle}：web"`), 'every row has a labelled handle');
+  check('row-order', html.indexOf('data-alias="web"') < html.indexOf('data-alias="db"'), 'hosts keep their order');
 }
 
-// ── keyboard reordering ─────────────────────────────────────────────────────
+// ── reordering: keyboard moves and the drag geometry ───────────────────────
 {
   check('move-down', moveAlias(['a', 'b', 'c'], 'a', 1).join() === 'b,a,c', moveAlias(['a', 'b', 'c'], 'a', 1).join());
   check('move-up', moveAlias(['a', 'b', 'c'], 'c', -1).join() === 'a,c,b', moveAlias(['a', 'b', 'c'], 'c', -1).join());
   check('move-clamped', moveAlias(['a', 'b', 'c'], 'a', -5).join() === 'a,b,c' && moveAlias(['a', 'b', 'c'], 'a', 9).join() === 'b,c,a', 'moves stop at the ends');
   check('move-unknown', moveAlias(['a', 'b'], 'zz', 1).join() === 'a,b', 'an unknown alias changes nothing');
   check('move-pure', (() => { const input = ['a', 'b']; moveAlias(input, 'a', 1); return input.join() === 'a,b'; })(), 'the input array is not mutated');
+  const rows = [0, 50, 100, 150].map((top) => ({ top, height: 50 }));
+  const at = (from, dy) => sortTarget(rows, from, dy);
+  check('drag-not-past-middle', at(0, 20).index === 0 && at(0, 20).shifts.every((shift) => shift === 0), JSON.stringify(at(0, 20)));
+  check('drag-past-one', at(0, 30).index === 1 && at(0, 30).shifts.join() === '0,-50,0,0', JSON.stringify(at(0, 30)));
+  check('drag-to-end', at(0, 160).index === 3 && at(0, 160).shifts.join() === '0,-50,-50,-50', JSON.stringify(at(0, 160)));
+  check('drag-up', at(3, -60).index === 2 && at(3, -60).shifts.join() === '0,0,50,0', JSON.stringify(at(3, -60)));
+  const tall = [{ top: 0, height: 50 }, { top: 50, height: 140 }, { top: 190, height: 50 }];
+  check('drag-past-tall-row', sortTarget(tall, 0, 60).index === 0 && sortTarget(tall, 0, 100).index === 1 && sortTarget(tall, 0, 100).shifts[1] === -50, JSON.stringify(sortTarget(tall, 0, 100)));
+  const spaced = [{ top: 0, height: 50 }, { top: 60, height: 50 }];
+  check('drag-gap', sortTarget(spaced, 0, 40).shifts[1] === -60, JSON.stringify(sortTarget(spaced, 0, 40)));
 }
 
 // ── primary action depends on the surface and the live processes ───────────
@@ -160,19 +174,19 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   check('action-dsh', renderHosts(dsh, { mode: 'dsh' }).includes('data-action="close" data-alias="web"') && /data-action="open" data-alias="db"[^>]*>重试/.test(renderHosts(dsh, { mode: 'dsh' })), 'dsh actions');
   const oneLive = { ...mcp, instances: [instances[0]] };
   check('action-one-process', renderHosts(oneLive, { mode: 'mcp' }).includes('data-action="open" data-alias="db"'), 'one server means direct open');
-  const many = renderHostCard(db, { state: twoLive, mode: 'mcp' });
-  check('action-many-processes', many.includes('<div class="host-actions"></div>') && count(many, 'data-pid=') === 2, 'several servers: the per-process buttons own connect');
-  const dead = renderHostCard(db, { state: { ...mcp, instances: [instances[1]] }, mode: 'mcp' });
-  check('action-no-process', dead.includes('<div class="host-actions"></div>') && dead.includes(TEXT.noProcesses), 'no live server: no connect button, the process block explains');
+  const many = renderHostRow(db, { state: twoLive, mode: 'mcp' });
+  check('action-many-processes', !many.includes('data-action="open"') && many.includes(`data-expand="db">${TEXT.processesShort}<`) && count(renderHostRow(db, { state: twoLive, mode: 'mcp', expanded: true }), 'data-pid=') === 2, 'several servers: the per-process buttons in the details own connect');
+  const dead = renderHostRow(db, { state: { ...mcp, instances: [instances[1]] }, mode: 'mcp', expanded: true });
+  check('action-no-process', !dead.includes('data-action="open"') && dead.includes(TEXT.noProcesses), 'no live server: no connect button, the details explain');
 }
 
-// ── per-process rows live inside each card (MCP) ───────────────────────────
+// ── per-process rows live in the details (MCP) ─────────────────────────────
 {
-  const mcpHtml = renderHostCard(web, { state: mcp, mode: 'mcp' });
-  check('card-per-process', mcpHtml.includes(TEXT.perProcess) && mcpHtml.includes('pid 111') && mcpHtml.includes('data-pid="111"'), 'process actions in the card');
-  check('card-pick-process', renderHostCard(db, { state: twoLive, mode: 'mcp' }).includes('data-pid="333"') && count(renderHostCard(db, { state: twoLive, mode: 'mcp' }), 'data-pid=') === 2, 'each live server gets a row');
-  check('card-no-processes', renderHostCard(db, { state: { ...mcp, instances: [] }, mode: 'mcp' }).includes(TEXT.noProcesses), 'empty process list');
-  check('card-dsh-no-processes', !renderHostCard(web, { state: dsh, mode: 'dsh' }).includes(TEXT.perProcess), 'the DSH card has no process block');
+  const mcpHtml = renderHostRow(web, { state: mcp, mode: 'mcp', expanded: true });
+  check('detail-per-process', mcpHtml.includes(TEXT.perProcess) && mcpHtml.includes('pid 111') && mcpHtml.includes('data-pid="111"'), 'process actions in the details');
+  check('detail-pick-process', renderHostRow(db, { state: twoLive, mode: 'mcp', expanded: true }).includes('data-pid="333"'), 'each live server gets a row');
+  check('detail-no-processes', renderHostRow(db, { state: { ...mcp, instances: [] }, mode: 'mcp', expanded: true }).includes(TEXT.noProcesses), 'empty process list');
+  check('detail-dsh-no-processes', !renderHostRow(web, { state: dsh, mode: 'dsh', expanded: true }).includes(TEXT.perProcess), 'DSH details have no process block');
 }
 
 // ── processes (MCP only) ───────────────────────────────────────────────────
@@ -243,7 +257,7 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   const html = [
     renderHeader({ mode: 'mcp', masked: true }),
     ...['hosts', 'processes', 'settings', 'diagnostics'].map((tab) => renderTab(tab, mcp, { mode: 'mcp' })),
-    renderHostCard(web, { state: mcp, mode: 'mcp' }),
+    renderHostRow(web, { state: mcp, mode: 'mcp', expanded: true }),
     renderEditDialog(web),
     renderFooter(mcp, { mode: 'mcp' })
   ].join('\n');
@@ -261,8 +275,8 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   const { SshHelperPanel, STYLES } = await import('../ui/panel-element.js');
   check('element-defined-by-name', readFileSync(new URL('../ui/panel-element.js', import.meta.url), 'utf8').includes("customElements.define('ssh-helper-panel'"), 'the element must define itself');
   check('observed-attributes', SshHelperPanel.observedAttributes.join(',') === 'api-base,mode', JSON.stringify(SshHelperPanel.observedAttributes));
-  check('hosts-grid', STYLES.includes('.hosts{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr))') && STYLES.includes('align-items:stretch') && STYLES.includes('.host-procs{margin-top:auto}'), 'cards share a grid: equal widths, equal heights per row, process rows at the bottom');
-  check('rows-label-column', STYLES.includes('.rows{display:grid;grid-template-columns:64px minmax(0,1fr)'), 'one label column for every card');
+  check('host-columns-css', STYLES.includes('.host-cols{display:grid;grid-template-columns:28px') && STYLES.includes('.host-table{min-width:'), 'header and rows share one column template');
+  check('drag-motion-css', STYLES.includes('.hosts.sorting .host{transition:transform') && STYLES.includes('.hosts.no-motion .host{transition:none!important}'), 'rows slide while sorting and snap without motion when the DOM is reordered');
   check('grip-touch', STYLES.includes('touch-action:none') && STYLES.includes('cursor:grab'), 'the handle drags on touch screens too');
   check('theme-pierces-shadow', STYLES.includes(':host') && STYLES.includes('--dsw-alias-bg-base') && STYLES.includes('prefers-color-scheme:dark') && STYLES.includes('container-type:inline-size'), 'theme hooks');
 

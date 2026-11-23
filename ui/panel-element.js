@@ -19,6 +19,7 @@
 import {
   TEXT,
   moveAlias,
+  sortTarget,
   renderBanners,
   renderEditDialog,
   renderFooter,
@@ -113,30 +114,49 @@ button,input{font:inherit;color:inherit}
 .num:focus,.text:focus{outline:none;border-color:var(--brand)}
 .field{display:flex;flex-direction:column;gap:6px}
 .field>span{font-size:12px;color:var(--fg2);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
-.hosts{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px;align-items:stretch}
-.host{display:flex;flex-direction:column;gap:12px;padding:12px 16px 14px;border:1px solid var(--b1);border-radius:12px;background:var(--l1);min-width:0;transition:border-color .14s ease,box-shadow .14s ease,opacity .14s ease}
-.host:hover{border-color:var(--b2)}
-.host-head{display:flex;align-items:center;gap:8px;min-height:30px}
-.grip{display:inline-flex;align-items:center;justify-content:center;width:22px;height:28px;margin:0 -2px 0 -8px;padding:0;border:0;border-radius:6px;background:none;color:var(--fg2);cursor:grab;touch-action:none;opacity:.5;flex:0 0 auto}
+.pane.wide{max-width:none}
+.host-table{min-width:1320px;border:1px solid var(--b1);border-radius:12px;background:var(--l1);overflow:hidden}
+.host-cols{display:grid;grid-template-columns:28px minmax(120px,1fr) 180px 110px 100px minmax(190px,1.4fr) 56px 112px minmax(150px,1.3fr) 150px;column-gap:12px;align-items:center;padding:0 12px 0 8px}
+.host-header{height:34px;font-size:11.5px;font-weight:500;color:var(--fg2);background:var(--l2);border-bottom:1px solid var(--b1);white-space:nowrap}
+.hosts{position:relative}
+.host{position:relative;background:var(--l1);border-top:1px solid var(--b1)}
+.host:first-child{border-top:0}
+.host-line{min-height:52px;font-size:12.5px}
+.host:hover .host-line{background:color-mix(in srgb,var(--l2) 45%,transparent)}
+.host.is-hidden .host-name .name{color:var(--fg2)}
+.cell{min-width:0}
+.cell.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cell.inline{display:flex;align-items:center;gap:6px}
+.cell .num{width:76px;height:28px}
+.cell .text{height:28px;font-size:12px}
+.host-name{display:flex;align-items:center;gap:8px;min-width:0}
+.host-name .name{font-weight:600;font-size:13px}
+.state-cell{display:flex;align-items:center;gap:8px;min-width:0}
+.state-text{min-width:0}
+.hk.fail{color:var(--err);font-weight:600}
+.hk.warnish{color:var(--warn)}
+.chip{flex:0 0 auto;display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:999px;border:1px solid transparent;font-size:11px;font-weight:600;cursor:pointer;background:none}
+.chip.err{color:var(--err);border-color:color-mix(in srgb,var(--err) 45%,transparent);background:color-mix(in srgb,var(--err) 8%,transparent)}
+.row-actions{display:flex;align-items:center;justify-content:flex-end;gap:4px}
+.btn.sm.icon{width:26px;padding:0}
+.expand svg{transition:transform .16s ease}
+.host.open .expand svg{transform:rotate(90deg)}
+.mono{font:12px/18px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.grip{display:inline-flex;align-items:center;justify-content:center;width:24px;height:30px;padding:0;border:0;border-radius:6px;background:none;color:var(--fg2);cursor:grab;touch-action:none;opacity:.45}
 .host:hover .grip,.grip:focus-visible{opacity:1}
 .grip:hover{background:var(--l2);color:var(--fg)}
 .grip:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
-.host-id{display:flex;align-items:center;gap:6px;flex:1;min-width:0}
-.host-id .name{font-size:13.5px}
-.host-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto}
-.rows{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px 12px;align-items:center;font-size:12.5px;line-height:18px}
-.row-k{color:var(--fg2);white-space:nowrap}
-.row-v{min-width:0;overflow-wrap:anywhere}
-.row-v.inline,.row-v.switch-row{display:flex;align-items:center;gap:8px}
-.row-v .text{height:30px}
-.row-v .num{width:84px;height:28px}
-.mono{font:12px/18px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-.host-section{display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--b1)}
-.host-procs{margin-top:auto}
-.host.dragging{opacity:.65;border-color:var(--brand);box-shadow:0 0 0 2px color-mix(in srgb,var(--brand) 30%,transparent)}
-.hosts.sorting,.hosts.sorting .grip{cursor:grabbing;user-select:none}
-.hosts.sorting .host:not(.dragging){transition:none}
+.host-detail{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 24px;padding:12px 16px 16px 48px;border-top:1px dashed var(--b1);background:color-mix(in srgb,var(--l2) 35%,transparent)}
+.detail-block{display:flex;flex-direction:column;gap:6px;min-width:0}
+.cmd-line{display:flex;align-items:center;gap:8px;min-width:0}
 .cmd-inline{flex:1;min-width:0;padding:5px 8px;border-radius:7px;background:var(--l2);font:11.5px/16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hosts.sorting{user-select:none;cursor:grabbing}
+.hosts.sorting .grip{cursor:grabbing}
+.hosts.sorting .host{transition:transform .2s cubic-bezier(.2,.8,.2,1)}
+.hosts.sorting .host.dragging{transition:none;z-index:3;box-shadow:0 10px 28px rgba(0,0,0,.18),0 0 0 1px var(--brand);border-radius:8px}
+.hosts.sorting .host.dragging .host-line{background:var(--l1)}
+.hosts .host.settling{transition:transform .16s cubic-bezier(.2,.8,.2,1);z-index:3}
+.hosts.no-motion .host{transition:none!important}
 .mosaic{display:inline-block;height:1.05em;min-width:4.5em;max-width:100%;vertical-align:-.18em;border-radius:4px;background-color:var(--mosaic-a);background-image:linear-gradient(45deg,var(--mosaic-b) 25%,transparent 25%,transparent 75%,var(--mosaic-b) 75%),linear-gradient(45deg,var(--mosaic-b) 25%,transparent 25%,transparent 75%,var(--mosaic-b) 75%);background-size:7px 7px;background-position:0 0,3.5px 3.5px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fg) 8%,transparent)}
 .block-title{font-size:12px;font-weight:600;color:var(--fg2);display:flex;align-items:center;gap:6px}
 .proc{display:flex;align-items:center;gap:8px;font-size:12.5px}
@@ -188,8 +208,6 @@ code{font:11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 }
 @container (max-width:520px){
   .row{flex-wrap:wrap}.what{flex-basis:100%;order:3;padding-left:21px}.who{flex:1 1 auto}
-  .hosts{grid-template-columns:minmax(0,1fr)}
-  .host{padding:12px}
 }
 `;
 
@@ -212,8 +230,10 @@ class SshHelperPanel extends HTMLElement {
     this.failures = 0;
     this.timer = undefined;
     this.credential = undefined;
-    /** The card being dragged: `{ alias, card, list, pointerId, before }`, or null. */
+    /** The row being dragged (see `startDrag`), or null. */
     this.drag = null;
+    /** Aliases whose detail strip is open. */
+    this.expanded = new Set();
     /** The alias whose drag handle gets focus back after the next redraw. */
     this.focusHandle = null;
     this.shadowRoot.innerHTML = `<style>${STYLES}</style><div class="frame" style="display:contents"></div>`;
@@ -329,7 +349,7 @@ class SshHelperPanel extends HTMLElement {
     // names.
     // A drag moves cards in the DOM itself; a redraw mid-drag would undo it.
     if (!force && (this.editing() || this.dialog || this.drag)) return;
-    const options = { mode: this.mode };
+    const options = { mode: this.mode, expanded: [...(this.expanded ?? [])] };
     if (!tabsFor(this.mode).includes(this.tab)) this.tab = 'hosts';
     const bodyScroll = this.shadowRoot.querySelector('.body')?.scrollTop ?? 0;
     // A redraw replaces every node: keep a focused drag handle focused, so a
@@ -350,16 +370,11 @@ class SshHelperPanel extends HTMLElement {
     if (focusAlias !== null) [...this.shadowRoot.querySelectorAll('[data-drag-handle]')].find((handle) => handle.dataset.alias === focusAlias)?.focus();
   }
 
-  // ── card order ──────────────────────────────────────────────────────────
-
-  /** The aliases in the order the cards are currently drawn. */
-  cardOrder(list) {
-    return [...list.querySelectorAll(':scope > .host')].map((card) => card.dataset.alias);
-  }
+  // ── row order ───────────────────────────────────────────────────────────
 
   /**
-   * Save a new card order: reorder the local state at once (so the next
-   * redraw already shows it), then persist it; the answer is the stored state.
+   * Save a new row order: reorder the local state at once (so the next redraw
+   * already shows it), then persist it; the answer is the stored state.
    */
   saveOrder(order) {
     const hosts = this.state?.hosts ?? [];
@@ -372,92 +387,120 @@ class SshHelperPanel extends HTMLElement {
   }
 
   /**
-   * Pointer drag on a card's handle (mouse, pen and touch alike): the card is
-   * moved in the DOM as the pointer passes the middle of another card, and the
-   * order is saved on release.
+   * Pointer drag on a row's handle (mouse, pen and touch alike). The dragged
+   * row follows the pointer; the rows it passes slide out of the way (CSS
+   * transitions on `transform`); on release it glides into its slot and only
+   * then is the DOM reordered and the order saved. Row geometry is measured
+   * once at the start, so moving never forces a layout.
    */
   startDrag(event, handle) {
-    const card = handle.closest('.host');
-    const list = card?.parentElement;
-    if (!card || !list || event.button !== 0) return;
+    const row = handle.closest('.host');
+    const list = row?.parentElement;
+    const body = this.shadowRoot.querySelector('.body');
+    if (!row || !list || !body || event.button !== 0 || this.drag) return;
     event.preventDefault();
     try {
-      // Keep receiving moves when the pointer leaves the handle; a failed
-      // capture (no such active pointer) must not cancel the drag.
       handle.setPointerCapture?.(event.pointerId);
     } catch {
       /* drag without capture */
     }
-    this.drag = { alias: card.dataset.alias, card, list, pointerId: event.pointerId, before: this.cardOrder(list).join('\n') };
-    card.classList.add('dragging');
+    const rows = [...list.children].filter((child) => child.classList.contains('host'));
+    const boxes = rows.map((child) => {
+      const box = child.getBoundingClientRect();
+      return { top: box.top, height: box.height };
+    });
+    const from = rows.indexOf(row);
+    this.drag = { row, list, body, rows, boxes, from, index: from, pointerId: event.pointerId, startY: event.clientY, y: event.clientY, scroll0: body.scrollTop, scrolling: false, settling: false };
     list.classList.add('sorting');
+    row.classList.add('dragging');
   }
 
   moveDrag(event) {
     const drag = this.drag;
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    drag.x = event.clientX;
+    if (!drag || drag.settling || event.pointerId !== drag.pointerId) return;
     drag.y = event.clientY;
+    this.layoutDrag();
     this.autoScroll();
-    this.reorderAt(event.clientX, event.clientY);
+  }
+
+  /** Place the dragged row under the pointer and slide the rows it has passed. */
+  layoutDrag() {
+    const drag = this.drag;
+    if (!drag) return;
+    const first = drag.boxes[0];
+    const last = drag.boxes.at(-1);
+    const own = drag.boxes[drag.from];
+    const raw = drag.y - drag.startY + (drag.body.scrollTop - drag.scroll0);
+    // Keep the row inside the table.
+    const dy = Math.max(first.top - own.top, Math.min(last.top + last.height - own.top - own.height, raw));
+    drag.row.style.transform = `translate3d(0, ${dy}px, 0)`;
+    const { index, shifts } = sortTarget(drag.boxes, drag.from, dy);
+    drag.rows.forEach((row, i) => {
+      if (i !== drag.from) row.style.transform = shifts[i] ? `translate3d(0, ${shifts[i]}px, 0)` : '';
+    });
+    drag.index = index;
   }
 
   /**
    * Near the top or bottom edge of the scroll area the list scrolls by itself
-   * (and keeps scrolling while the pointer rests there), so a card can be
-   * dragged past what is on screen — the narrow DSH sidebar shows one column.
+   * (and keeps scrolling while the pointer rests there), so a row can be
+   * dragged past what is on screen.
    */
   autoScroll() {
     const drag = this.drag;
-    const body = this.shadowRoot.querySelector('.body');
-    if (!drag || !body || drag.scrolling) return;
+    if (!drag || drag.scrolling) return;
     const step = () => {
       const current = this.drag;
-      if (current !== drag) return;
-      const box = body.getBoundingClientRect();
-      const edge = 48;
-      const speed = current.y < box.top + edge ? -Math.ceil((box.top + edge - current.y) / 4) : current.y > box.bottom - edge ? Math.ceil((current.y - box.bottom + edge) / 4) : 0;
-      if (speed === 0 || (speed < 0 && body.scrollTop <= 0) || (speed > 0 && body.scrollTop + body.clientHeight >= body.scrollHeight)) {
+      if (current !== drag || current.settling) return;
+      const box = current.body.getBoundingClientRect();
+      const edge = 56;
+      const speed = current.y < box.top + edge ? -Math.ceil((box.top + edge - current.y) / 3) : current.y > box.bottom - edge ? Math.ceil((current.y - box.bottom + edge) / 3) : 0;
+      const atEnd = speed < 0 ? current.body.scrollTop <= 0 : current.body.scrollTop + current.body.clientHeight >= current.body.scrollHeight;
+      if (speed === 0 || atEnd) {
         current.scrolling = false;
         return;
       }
-      body.scrollTop += speed;
-      this.reorderAt(current.x, current.y);
+      current.body.scrollTop += speed;
+      this.layoutDrag();
       setTimeout(step, 16);
     };
     drag.scrolling = true;
     setTimeout(step, 16);
   }
 
-  /** Move the dragged card past the card under the point once the point crosses its middle. */
-  reorderAt(x, y) {
+  /**
+   * Release (or cancel): glide the row into its slot, then reorder the DOM and
+   * clear every transform in one frame with transitions off, so nothing jumps.
+   */
+  endDrag(event, { cancel = false } = {}) {
     const drag = this.drag;
-    if (!drag) return;
-    const hit = this.shadowRoot.elementFromPoint?.(x, y);
-    const target = hit instanceof Element ? hit.closest('.host') : null;
-    if (!target || target === drag.card || target.parentElement !== drag.list) return;
-    const cards = [...drag.list.children];
-    const from = cards.indexOf(drag.card);
-    const to = cards.indexOf(target);
-    const box = target.getBoundingClientRect();
-    const own = drag.card.getBoundingClientRect();
-    // Same row: past the target's horizontal middle; another row: its vertical middle.
-    const sameRow = Math.abs(box.top - own.top) < box.height / 2;
-    const past = sameRow
-      ? (from < to ? x > box.left + box.width / 2 : x < box.left + box.width / 2)
-      : (from < to ? y > box.top + box.height / 2 : y < box.top + box.height / 2);
-    if (past) drag.list.insertBefore(drag.card, from < to ? target.nextSibling : target);
-  }
-
-  endDrag(event) {
-    const drag = this.drag;
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    this.drag = null;
-    drag.card.classList.remove('dragging');
-    drag.list.classList.remove('sorting');
-    const order = this.cardOrder(drag.list);
-    if (event.type === 'pointerup' && order.join('\n') !== drag.before) void this.saveOrder(order);
-    else this.render(true);
+    if (!drag || drag.settling || (event && event.pointerId !== drag.pointerId)) return;
+    const target = cancel || event?.type === 'pointercancel' ? drag.from : drag.index;
+    drag.settling = true;
+    const { boxes, from } = drag;
+    const offset = target > from ? boxes[target].top + boxes[target].height - boxes[from].top - boxes[from].height : target < from ? boxes[target].top - boxes[from].top : 0;
+    drag.row.classList.remove('dragging');
+    drag.row.classList.add('settling');
+    drag.row.style.transform = offset === 0 ? '' : `translate3d(0, ${offset}px, 0)`;
+    if (target === from) for (const row of drag.rows) if (row !== drag.row) row.style.transform = '';
+    const finish = () => {
+      if (this.drag !== drag) return;
+      drag.list.classList.add('no-motion');
+      for (const row of drag.rows) row.style.transform = '';
+      drag.row.classList.remove('settling');
+      drag.list.classList.remove('sorting');
+      if (target !== from) {
+        const anchor = drag.rows[target];
+        drag.list.insertBefore(drag.row, target > from ? anchor.nextSibling : anchor);
+      }
+      void drag.list.offsetHeight;
+      drag.list.classList.remove('no-motion');
+      this.drag = null;
+      const order = [...drag.list.children].filter((child) => child.classList.contains('host')).map((child) => child.dataset.alias);
+      if (target !== from) void this.saveOrder(order);
+      else this.render(true);
+    };
+    setTimeout(finish, 170);
   }
 
   // ── interaction ─────────────────────────────────────────────────────────
@@ -491,6 +534,10 @@ class SshHelperPanel extends HTMLElement {
         if (host) void this.post('meta', { alias: d.alias, [d.field]: !(host[d.field] === true) }).then(() => this.mode === 'mcp' && setTimeout(() => this.load(true), 1500));
       } else if (d.settingToggle !== undefined) {
         void this.post('settings', { [d.settingToggle]: !(this.state?.settings?.[d.settingToggle] === true || (d.settingToggle === 'sshVisible' && this.state?.settings?.sshVisible !== false)) });
+      } else if (d.expand !== undefined) {
+        if (this.expanded.has(d.expand)) this.expanded.delete(d.expand);
+        else this.expanded.add(d.expand);
+        this.render(true);
       } else if (d.edit !== undefined) {
         const host = this.hostByAlias(d.edit);
         if (host) this.openDialog(host);
@@ -503,6 +550,7 @@ class SshHelperPanel extends HTMLElement {
     root.addEventListener('pointermove', (event) => this.moveDrag(event));
     root.addEventListener('pointerup', (event) => this.endDrag(event));
     root.addEventListener('pointercancel', (event) => this.endDrag(event));
+    root.addEventListener('lostpointercapture', (event) => this.endDrag(event, { cancel: true }));
     root.addEventListener('mousedown', (event) => {
       if (event.target instanceof Element && event.target.matches('[data-dialog-backdrop]') && !this.dialog?.saving) this.closeDialog();
     });
@@ -529,7 +577,8 @@ class SshHelperPanel extends HTMLElement {
     root.addEventListener('keydown', (event) => {
       const target = event.target;
       if (event.key === 'Escape') {
-        if (this.dialog && !this.dialog.saving) this.closeDialog();
+        if (this.drag) this.endDrag(null, { cancel: true });
+        else if (this.dialog && !this.dialog.saving) this.closeDialog();
         return;
       }
       // A focused drag handle moves its card with the arrow keys.
