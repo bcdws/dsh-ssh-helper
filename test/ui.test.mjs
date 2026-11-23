@@ -275,7 +275,8 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   const { SshHelperPanel, STYLES } = await import('../ui/panel-element.js');
   check('element-defined-by-name', readFileSync(new URL('../ui/panel-element.js', import.meta.url), 'utf8').includes("customElements.define('ssh-helper-panel'"), 'the element must define itself');
   check('observed-attributes', SshHelperPanel.observedAttributes.join(',') === 'api-base,mode', JSON.stringify(SshHelperPanel.observedAttributes));
-  check('host-columns-css', STYLES.includes('.host-cols{display:grid;grid-template-columns:28px') && STYLES.includes('.host-table{min-width:'), 'header and rows share one column template');
+  check('host-columns-css', STYLES.includes('.host-cols{display:grid;grid-template-columns:28px') && STYLES.includes('@container (min-width:1320px)') && !STYLES.includes('.host-table{min-width:'), 'header and rows share one column template, and the table never forces a horizontal scroll');
+  check('host-cells-placed', ['name', 'addr', 'key', 'hk', 'state', 'vis', 'idle', 'remark', 'act'].every((area) => STYLES.includes(`grid-area:${area}`)), 'every cell is placed by name, so one markup serves the one-line and the two-line layout');
   check('drag-motion-css', STYLES.includes('.hosts.sorting .host{transition:transform') && STYLES.includes('.hosts.no-motion .host{transition:none!important}'), 'rows slide while sorting and snap without motion when the DOM is reordered');
   check('grip-touch', STYLES.includes('touch-action:none') && STYLES.includes('cursor:grab'), 'the handle drags on touch screens too');
   check('theme-pierces-shadow', STYLES.includes(':host') && STYLES.includes('--dsw-alias-bg-base') && STYLES.includes('prefers-color-scheme:dark') && STYLES.includes('container-type:inline-size'), 'theme hooks');

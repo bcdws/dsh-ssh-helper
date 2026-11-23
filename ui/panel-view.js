@@ -11,6 +11,9 @@
  * address, key, host key, state, visibility, idle override, remark, actions),
  * and a detail strip under a row when it is expanded (counters, failures,
  * last command, sessions, MCP process rows). Rows are dragged into order.
+ * Below ~1320px of panel width the same markup reflows (CSS container
+ * queries in panel-element.js) into two lines per host, then into a stacked
+ * card; the cells carry `c-*` names and `lbl` captions for that.
  *
  * Interaction hooks are `data-*` attributes; the element wires them:
  *   data-tab, data-action (+ data-alias, data-pid), data-toggle
@@ -385,18 +388,28 @@ export function renderHostRow(host, { state, mode, expanded = false }) {
   const effective = Math.round((host.effectiveIdleTimeoutMs ?? 0) / 1000);
   const action = primaryAction(host, state, mode);
   const processes = mode === 'mcp' && action === '' ? `<button type="button" class="btn sm" data-expand="${alias}">${TEXT.processesShort}</button>` : '';
+  // The row is one grid. Wide panels lay every cell out on a single line under
+  // the column headings; narrower ones put identity, address, state and actions
+  // on the first line and the `host-meta` cells (key, host key, visibility,
+  // idle override, remark) on a second, where each shows its own `lbl`. The
+  // cells carry `c-*` names so the stylesheet can place them either way.
+  const label = (text) => `<span class="lbl">${text}</span>`;
+  const first = action || processes || '<span class="slot"></span>';
+  const edit = editable ? `<button type="button" class="btn sm ghost" data-edit="${alias}">${TEXT.editShort}</button>` : '<span class="slot"></span>';
   return `<article class="host${host.hidden ? ' is-hidden' : ''}${expanded ? ' open' : ''}" data-alias="${alias}">
   <div class="host-cols host-line" role="row">
     <button type="button" class="grip" data-drag-handle data-alias="${alias}" aria-label="${esc(TEXT.dragHandle)}：${alias}" title="${esc(TEXT.dragHandle)}">${icon('grip', 16)}</button>
     <div class="host-name"><span class="dot ${key}"></span><span class="name ell" title="${alias}">${alias}</span>${host.hidden ? badge(TEXT.hidden, 'muted', TEXT.hiddenHint) : ''}</div>
-    <div class="cell ell">${masked ? mosaicHtml(host) : `<span class="mono" title="${esc(addressText(host))}">${esc(addressText(host))}</span>`}${editable ? '' : ` <span class="muted small" title="${TEXT.sourceConfig}">·插件</span>`}</div>
-    <div class="cell ell" title="${esc(host.keyName ?? '')}">${esc(host.keyName ?? '—')}</div>
-    <div class="cell ell">${hostKeyCell(host)}</div>
-    <div class="cell state-cell">${stateCell(host)}</div>
-    <div class="cell">${switchHtml({ checked: host.hidden !== true, label: TEXT.hiddenHint, attrs: `data-toggle data-field="hidden" data-alias="${alias}"` })}</div>
-    <div class="cell inline"><input class="num" type="number" min="0" inputmode="numeric" placeholder="全局 ${effective}" value="${esc(idle)}" title="${esc(TEXT.idleOverrideDesc)}" aria-label="${esc(TEXT.idleOverride)}" data-meta-input data-field="idleTimeoutMs" data-alias="${alias}"><span class="muted small">${TEXT.seconds}</span></div>
-    <div class="cell"><input class="text" maxlength="500" placeholder="${TEXT.remarkPlaceholder}" value="${esc(host.remark ?? '')}" title="${esc(host.remark ?? '')}" aria-label="${esc(TEXT.remark)}" data-meta-input data-field="remark" data-alias="${alias}"></div>
-    <div class="cell row-actions">${action}${processes}${editable ? `<button type="button" class="btn sm ghost" data-edit="${alias}">${TEXT.editShort}</button>` : ''}<button type="button" class="btn sm ghost icon expand" data-expand="${alias}" aria-expanded="${expanded ? 'true' : 'false'}" aria-label="${TEXT.details}" title="${TEXT.details}">${icon('chevron')}</button></div>
+    <div class="cell c-addr ell">${masked ? mosaicHtml(host) : `<span class="mono" title="${esc(addressText(host))}">${esc(addressText(host))}</span>`}${editable ? '' : ` <span class="muted small" title="${TEXT.sourceConfig}">·插件</span>`}</div>
+    <div class="host-meta">
+      <div class="cell c-key ell" title="${esc(host.keyName ?? '')}">${label(TEXT.columns.key)}<span class="ell">${esc(host.keyName ?? '—')}</span></div>
+      <div class="cell c-hk ell">${label(TEXT.columns.hostKey)}${hostKeyCell(host)}</div>
+      <div class="cell c-vis">${label(TEXT.columns.visible)}${switchHtml({ checked: host.hidden !== true, label: TEXT.hiddenHint, attrs: `data-toggle data-field="hidden" data-alias="${alias}"` })}</div>
+      <div class="cell c-idle inline">${label(TEXT.columns.idle)}<input class="num" type="number" min="0" inputmode="numeric" placeholder="全局 ${effective}" value="${esc(idle)}" title="${esc(TEXT.idleOverrideDesc)}" aria-label="${esc(TEXT.idleOverride)}" data-meta-input data-field="idleTimeoutMs" data-alias="${alias}"><span class="muted small">${TEXT.seconds}</span></div>
+      <div class="cell c-remark">${label(TEXT.columns.remark)}<input class="text" maxlength="500" placeholder="${TEXT.remarkPlaceholder}" value="${esc(host.remark ?? '')}" title="${esc(host.remark ?? '')}" aria-label="${esc(TEXT.remark)}" data-meta-input data-field="remark" data-alias="${alias}"></div>
+    </div>
+    <div class="cell c-state state-cell">${stateCell(host)}</div>
+    <div class="cell c-act row-actions">${first}${edit}<button type="button" class="btn sm ghost icon expand" data-expand="${alias}" aria-expanded="${expanded ? 'true' : 'false'}" aria-label="${TEXT.details}" title="${TEXT.details}">${icon('chevron')}</button></div>
   </div>
   ${expanded ? hostDetail(host, { state, mode }) : ''}
 </article>`;
