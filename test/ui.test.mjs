@@ -28,6 +28,7 @@ import {
   renderSettings,
   renderTab,
   renderTabs,
+  slotOffset,
   sortTarget,
   tabsFor
 } from '../ui/panel-view.js';
@@ -110,7 +111,7 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   const open = renderHosts(dsh, { mode: 'dsh', expanded: ['web', 'db'] });
   check('host-rows', count(html, '<article class="host') === 2 && html.includes('class="host-table"') && html.includes('class="hosts"'), `${count(html, '<article class="host')} rows`);
   check('no-side-panel', !html.includes('drawer') && !html.includes('data-select="') && !html.includes('class="row"'), 'the list must not open a side panel');
-  const headings = [...html.matchAll(/<span role="columnheader">([^<]*)<\/span>/g)].map((match) => match[1]);
+  const headings = [...html.matchAll(/<span role="columnheader"[^>]*>(?:<span class="dot"><\/span>)?([^<]*)<\/span>/g)].map((match) => match[1]);
   const c = TEXT.columns;
   check('host-columns', headings.join(',') === [c.host, c.address, c.key, c.hostKey, c.state, c.visible, c.idle, c.remark].join(','), headings.join(','));
   check('row-cells', count(renderHostRow(web, { state: dsh, mode: 'dsh' }), '<div class="cell') === 8 && count(renderHostRow(db, { state: dsh, mode: 'dsh' }), '<div class="cell') === 8, 'every row has the same cells');
@@ -167,6 +168,8 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   check('drag-past-tall-row', sortTarget(tall, 0, 60).index === 0 && sortTarget(tall, 0, 100).index === 1 && sortTarget(tall, 0, 100).shifts[1] === -50, JSON.stringify(sortTarget(tall, 0, 100)));
   const spaced = [{ top: 0, height: 50 }, { top: 60, height: 50 }];
   check('drag-gap', sortTarget(spaced, 0, 40).shifts[1] === -60, JSON.stringify(sortTarget(spaced, 0, 40)));
+  check('slot-offset', slotOffset(rows, 1, 3) === 100 && slotOffset(rows, 2, 0) === -100 && slotOffset(rows, 2, 2) === 0, 'down to the bottom edge, up to the top edge');
+  check('slot-offset-tall', slotOffset(tall, 0, 1) === 140 && slotOffset(tall, 2, 0) === -190, 'uneven rows: the dragged row lands flush');
 }
 
 // ── primary action depends on the surface and the live processes ───────────
@@ -275,9 +278,9 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   const { SshHelperPanel, STYLES } = await import('../ui/panel-element.js');
   check('element-defined-by-name', readFileSync(new URL('../ui/panel-element.js', import.meta.url), 'utf8').includes("customElements.define('ssh-helper-panel'"), 'the element must define itself');
   check('observed-attributes', SshHelperPanel.observedAttributes.join(',') === 'api-base,mode', JSON.stringify(SshHelperPanel.observedAttributes));
-  check('host-columns-css', STYLES.includes('.host-cols{display:grid;grid-template-columns:28px') && STYLES.includes('@container (min-width:1320px)') && !STYLES.includes('.host-table{min-width:'), 'header and rows share one column template, and the table never forces a horizontal scroll');
+  check('host-columns-css', STYLES.includes('.host-cols{display:grid;grid-template-columns:var(--grip-w)') && STYLES.includes('calc(var(--row-pad) + var(--grip-w) + var(--col-gap))') && STYLES.includes('@container (min-width:1320px)') && !STYLES.includes('.host-table{min-width:'), 'header and rows share one column template, details indent to the name column, and the table never forces a horizontal scroll');
   check('host-cells-placed', ['name', 'addr', 'key', 'hk', 'state', 'vis', 'idle', 'remark', 'act'].every((area) => STYLES.includes(`grid-area:${area}`)), 'every cell is placed by name, so one markup serves the one-line and the two-line layout');
-  check('drag-motion-css', STYLES.includes('.hosts.sorting .host{transition:transform') && STYLES.includes('.hosts.no-motion .host{transition:none!important}'), 'rows slide while sorting and snap without motion when the DOM is reordered');
+  check('drag-motion-css', STYLES.includes('.hosts.sorting .host{transition:transform') && STYLES.includes('.hosts .host.settling{transition:transform'), 'rows slide while sorting and the dropped row settles into its slot');
   check('grip-touch', STYLES.includes('touch-action:none') && STYLES.includes('cursor:grab'), 'the handle drags on touch screens too');
   check('theme-pierces-shadow', STYLES.includes(':host') && STYLES.includes('--dsw-alias-bg-base') && STYLES.includes('prefers-color-scheme:dark') && STYLES.includes('container-type:inline-size'), 'theme hooks');
 

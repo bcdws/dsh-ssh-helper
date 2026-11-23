@@ -37,7 +37,6 @@ export const TEXT = {
   retry: '重试',
   states: { ready: '已连接', connecting: '连接中', idle: '未连接', down: '已断开', paused: '已暂停' },
   hidden: '隐藏',
-  visible: '可见',
   sessions: '会话',
   commands: '命令',
   noHosts: '没有可用的 SSH 主机：检查 ~/.ssh/config 或插件配置。',
@@ -62,21 +61,15 @@ export const TEXT = {
   hostKeyNone: '本面板进程还没和这台主机握过手',
   seconds: '秒',
   hiddenHint: '隐藏后 agent 看不到也连不上该主机；现有连接会在 20 秒后自动断开，期间恢复可见则不会断开；这里仍可管理。',
-  idleOverride: '空闲超时',
   idleOverrideDesc: '秒；留空跟随全局设置，0 = 永不断开。',
-  remark: '备注',
   remarkPlaceholder: '这台机器是做什么的…',
-  address: '地址',
-  key: '密钥',
-  source: '来源',
   sourceConfig: '插件配置',
+  sourceShort: '插件',
   edit: '编辑 Host / 密钥',
   editShort: '编辑',
-  state: '状态',
   connection: '连接',
   lastFailure: '最近失败',
   lastCommand: '最近命令',
-  hostKey: '主机密钥',
   perProcess: '各进程',
   noProcesses: '没有正在运行的 MCP 进程。启动一个使用此 server 的客户端会话后，这里会显示它。',
   processesNote: '每个客户端会话各起一个 dsh-ssh-mcp 进程，各有自己的连接池；进程启动后会自动出现在这里。',
@@ -167,10 +160,13 @@ export const icon = (name, size = 14) =>
     .map((d) => `<path d="${d}"/>`)
     .join('')}</svg>`;
 
-const switchHtml = ({ checked, attrs, label, neutral = false }) =>
-  `<button type="button" class="switch${neutral ? ' neutral' : ''}" role="switch" aria-checked="${checked ? 'true' : 'false'}" aria-label="${esc(label)}" title="${esc(label)}" ${attrs}><span class="knob"></span></button>`;
+const switchHtml = ({ checked, attrs, label }) =>
+  `<button type="button" class="switch" role="switch" aria-checked="${checked ? 'true' : 'false'}" aria-label="${esc(label)}" title="${esc(label)}" ${attrs}><span class="knob"></span></button>`;
 
 const badge = (text, kind = '', title = '') => `<span class="badge ${kind}"${title ? ` title="${esc(title)}"` : ''}>${esc(text)}</span>`;
+
+/** The placeholder line of an empty block. */
+const none = (text) => `<div class="muted small">${text}</div>`;
 
 // ── header & tabs ───────────────────────────────────────────────────────────
 
@@ -215,11 +211,15 @@ const liveInstances = (state) => (state?.instances ?? []).filter((instance) => !
 const clientName = (instance) =>
   instance?.client && typeof instance.client.name === 'string' ? `${instance.client.name}${instance.client.version ? ` ${instance.client.version}` : ''}` : '（未初始化）';
 
-/** Header action: with exactly one MCP server (or in DSH) connect / disconnect / retry; with none or several, the process rows below own it. */
+/**
+ * Row action: with exactly one MCP server (or in DSH) connect / disconnect /
+ * retry; with none or several, a button that opens the details, whose
+ * per-process rows own connecting.
+ */
 function primaryAction(host, state, mode) {
-  if (mode === 'mcp' && liveInstances(state).length !== 1) return '';
-  const { key } = hostState(host);
   const alias = esc(host.alias);
+  if (mode === 'mcp' && liveInstances(state).length !== 1) return `<button type="button" class="btn sm" data-expand="${alias}">${TEXT.processesShort}</button>`;
+  const { key } = hostState(host);
   if (key === 'ready' || key === 'connecting') return `<button type="button" class="btn sm" data-action="close" data-alias="${alias}">${TEXT.disconnect}</button>`;
   return `<button type="button" class="btn sm primary" data-action="open" data-alias="${alias}">${key === 'paused' ? TEXT.retry : TEXT.open}</button>`;
 }
@@ -235,7 +235,7 @@ function hostCounters(host) {
 /** One row per live MCP server, with its own connect/disconnect. */
 function processRows(host, state) {
   const instances = liveInstances(state);
-  if (instances.length === 0) return `<div class="muted small">${TEXT.noProcesses}</div>`;
+  if (instances.length === 0) return none(TEXT.noProcesses);
   const reports = new Map((host.instances ?? []).map((report) => [report.pid, report]));
   return instances
     .map((instance) => {
@@ -306,6 +306,20 @@ export function sortTarget(boxes, from, dy) {
   return { index, shifts };
 }
 
+/**
+ * How far the row at `from` moves to fill slot `to` (same `boxes` as
+ * `sortTarget`): down to the target's bottom edge, or up to its top edge. The
+ * first and last slots bound a drag; the chosen slot is where a drop settles.
+ */
+export function slotOffset(boxes, from, to) {
+  if (to > from) return boxes[to].top + boxes[to].height - boxes[from].top - boxes[from].height;
+  if (to < from) return boxes[to].top - boxes[from].top;
+  return 0;
+}
+
+/** The connect error worth showing: none while the host is connected. */
+const connectError = (host, key) => (key === 'ready' ? '' : host.lastError ?? '');
+
 /** The host-key verdict as a short label, with the full meaning as a tooltip. */
 function hostKeyCell(host) {
   if (!host.hostKey) return `<span class="muted" title="${esc(TEXT.hostKeyNone)}">—</span>`;
@@ -323,7 +337,7 @@ function stateCell(host) {
   const sessions = host.sessions?.length ?? 0;
   if (sessions > 0) extra.push(`${sessions} ${TEXT.sessions}`);
   if ((host.commands ?? 0) > 0) extra.push(`${host.commands} ${TEXT.commands}`);
-  const failed = host.lastFailure || (host.lastError && key !== 'ready');
+  const failed = host.lastFailure || connectError(host, key);
   const count = host.callFailures || (failed ? 1 : 0);
   const full = [label, ...extra].join(' · ');
   return `<span class="state-text ell" title="${esc(full)}">${esc(label)}${extra.length > 0 ? ` <span class="muted small">${esc(extra.join(' · '))}</span>` : ''}</span>${
@@ -339,7 +353,7 @@ function hostDetail(host, { state, mode }) {
     host.lastFailure
       ? `<div class="failure"><b>${esc(host.lastFailure.code)}</b> · ${esc(host.lastFailure.tool)} · ${esc(age(host.lastFailure.ageSeconds))}${host.callFailures ? ` · 共 ${esc(host.callFailures)} 次` : ''}<div class="msg">${esc(host.lastFailure.message)}</div></div>`
       : '',
-    host.lastError && key !== 'ready' ? `<div class="failure"><b>${TEXT.connection}</b><div class="msg">${esc(host.lastError)}</div></div>` : ''
+    connectError(host, key) ? `<div class="failure"><b>${TEXT.connection}</b><div class="msg">${esc(host.lastError)}</div></div>` : ''
   ]
     .filter(Boolean)
     .join('');
@@ -347,13 +361,13 @@ function hostDetail(host, { state, mode }) {
   const block = (title, body) => `<div class="detail-block"><div class="block-title">${title}</div>${body}</div>`;
   return `<div class="host-detail">${[
     mode === 'mcp' ? block(TEXT.perProcess, processRows(host, state)) : '',
-    block(TEXT.connectionStats, counters ? `<div class="small">${counters}</div>` : `<div class="muted small">${TEXT.noCounters}</div>`),
-    block(TEXT.lastFailure, failures || `<div class="muted small">${TEXT.noFailure}</div>`),
+    block(TEXT.connectionStats, counters ? `<div class="small">${counters}</div>` : none(TEXT.noCounters)),
+    block(TEXT.lastFailure, failures || none(TEXT.noFailure)),
     block(
       TEXT.lastCommand,
       host.lastCommand
         ? `<div class="cmd-line"><code class="cmd-inline" title="${esc(host.lastCommand)}">${esc(host.lastCommand)}</code><span class="muted small">${esc(age(host.lastCommandAgeSeconds ?? host.lastCommandSeconds))}</span></div>`
-        : `<div class="muted small">${TEXT.noCommand}</div>`
+        : none(TEXT.noCommand)
     ),
     block(
       `${TEXT.sessions}${sessions.length > 0 ? ` <span class="count">${sessions.length}</span>` : ''}`,
@@ -364,15 +378,19 @@ function hostDetail(host, { state, mode }) {
                 `<div class="proc"><span class="dot ${session.alive === false ? 'down' : 'ready'}"></span><span class="ell">${esc(session.name)} <span class="muted small">${esc(session.ownerShort ?? session.owner ?? '')}</span></span><span class="muted small">${esc(session.commands ?? 0)} ${TEXT.commands}${session.idleSeconds !== undefined ? ` · 空闲 ${esc(span(session.idleSeconds))}` : ''}</span></div>`
             )
             .join('')
-        : `<div class="muted small">${TEXT.noSessions}</div>`
+        : none(TEXT.noSessions)
     )
   ].join('')}</div>`;
 }
 
-/** The column headings; the same grid template as every row. */
+/**
+ * The column headings, in `TEXT.columns` order, on the same grid template as
+ * every row. The host heading reuses the row's dot-and-name markup (the dot
+ * invisible), so it lines up with the names without a hand-tuned offset.
+ */
 function hostHeader() {
-  const c = TEXT.columns;
-  return `<div class="host-cols host-header" role="row"><span></span>${[c.host, c.address, c.key, c.hostKey, c.state, c.visible, c.idle, c.remark].map((title) => `<span role="columnheader">${title}</span>`).join('')}<span></span></div>`;
+  const [host, ...rest] = Object.values(TEXT.columns);
+  return `<div class="host-cols host-header" role="row"><span></span><span role="columnheader" class="host-name"><span class="dot"></span>${host}</span>${rest.map((title) => `<span role="columnheader">${title}</span>`).join('')}<span></span></div>`;
 }
 
 /**
@@ -386,30 +404,29 @@ export function renderHostRow(host, { state, mode, expanded = false }) {
   const editable = host.source === 'ssh-config';
   const idle = host.idleTimeoutMs === null || host.idleTimeoutMs === undefined ? '' : String(Math.round(host.idleTimeoutMs / 1000));
   const effective = Math.round((host.effectiveIdleTimeoutMs ?? 0) / 1000);
-  const action = primaryAction(host, state, mode);
-  const processes = mode === 'mcp' && action === '' ? `<button type="button" class="btn sm" data-expand="${alias}">${TEXT.processesShort}</button>` : '';
+  const address = esc(addressText(host));
+  const remark = esc(host.remark ?? '');
   // The row is one grid. Wide panels lay every cell out on a single line under
   // the column headings; narrower ones put identity, address, state and actions
   // on the first line and the `host-meta` cells (key, host key, visibility,
   // idle override, remark) on a second, where each shows its own `lbl`. The
   // cells carry `c-*` names so the stylesheet can place them either way.
   const label = (text) => `<span class="lbl">${text}</span>`;
-  const first = action || processes || '<span class="slot"></span>';
   const edit = editable ? `<button type="button" class="btn sm ghost" data-edit="${alias}">${TEXT.editShort}</button>` : '<span class="slot"></span>';
   return `<article class="host${host.hidden ? ' is-hidden' : ''}${expanded ? ' open' : ''}" data-alias="${alias}">
   <div class="host-cols host-line" role="row">
     <button type="button" class="grip" data-drag-handle data-alias="${alias}" aria-label="${esc(TEXT.dragHandle)}：${alias}" title="${esc(TEXT.dragHandle)}">${icon('grip', 16)}</button>
     <div class="host-name"><span class="dot ${key}"></span><span class="name ell" title="${alias}">${alias}</span>${host.hidden ? badge(TEXT.hidden, 'muted', TEXT.hiddenHint) : ''}</div>
-    <div class="cell c-addr ell">${masked ? mosaicHtml(host) : `<span class="mono" title="${esc(addressText(host))}">${esc(addressText(host))}</span>`}${editable ? '' : ` <span class="muted small" title="${TEXT.sourceConfig}">·插件</span>`}</div>
+    <div class="cell c-addr ell">${masked ? mosaicHtml(host) : `<span class="mono" title="${address}">${address}</span>`}${editable ? '' : ` <span class="muted small" title="${TEXT.sourceConfig}">·${TEXT.sourceShort}</span>`}</div>
     <div class="host-meta">
       <div class="cell c-key ell" title="${esc(host.keyName ?? '')}">${label(TEXT.columns.key)}<span class="ell">${esc(host.keyName ?? '—')}</span></div>
       <div class="cell c-hk ell">${label(TEXT.columns.hostKey)}${hostKeyCell(host)}</div>
       <div class="cell c-vis">${label(TEXT.columns.visible)}${switchHtml({ checked: host.hidden !== true, label: TEXT.hiddenHint, attrs: `data-toggle data-field="hidden" data-alias="${alias}"` })}</div>
-      <div class="cell c-idle inline">${label(TEXT.columns.idle)}<input class="num" type="number" min="0" inputmode="numeric" placeholder="全局 ${effective}" value="${esc(idle)}" title="${esc(TEXT.idleOverrideDesc)}" aria-label="${esc(TEXT.idleOverride)}" data-meta-input data-field="idleTimeoutMs" data-alias="${alias}"><span class="muted small">${TEXT.seconds}</span></div>
-      <div class="cell c-remark">${label(TEXT.columns.remark)}<input class="text" maxlength="500" placeholder="${TEXT.remarkPlaceholder}" value="${esc(host.remark ?? '')}" title="${esc(host.remark ?? '')}" aria-label="${esc(TEXT.remark)}" data-meta-input data-field="remark" data-alias="${alias}"></div>
+      <div class="cell c-idle inline">${label(TEXT.columns.idle)}<input class="num" type="number" min="0" inputmode="numeric" placeholder="全局 ${effective}" value="${esc(idle)}" title="${esc(TEXT.idleOverrideDesc)}" aria-label="${esc(TEXT.columns.idle)}" data-meta-input data-field="idleTimeoutMs" data-alias="${alias}"><span class="muted small">${TEXT.seconds}</span></div>
+      <div class="cell c-remark">${label(TEXT.columns.remark)}<input class="text" maxlength="500" placeholder="${TEXT.remarkPlaceholder}" value="${remark}" title="${remark}" aria-label="${esc(TEXT.columns.remark)}" data-meta-input data-field="remark" data-alias="${alias}"></div>
     </div>
     <div class="cell c-state state-cell">${stateCell(host)}</div>
-    <div class="cell c-act row-actions">${first}${edit}<button type="button" class="btn sm ghost icon expand" data-expand="${alias}" aria-expanded="${expanded ? 'true' : 'false'}" aria-label="${TEXT.details}" title="${TEXT.details}">${icon('chevron')}</button></div>
+    <div class="cell c-act row-actions">${primaryAction(host, state, mode)}${edit}<button type="button" class="btn sm ghost icon expand" data-expand="${alias}" aria-expanded="${expanded ? 'true' : 'false'}" aria-label="${TEXT.details}" title="${TEXT.details}">${icon('chevron')}</button></div>
   </div>
   ${expanded ? hostDetail(host, { state, mode }) : ''}
 </article>`;

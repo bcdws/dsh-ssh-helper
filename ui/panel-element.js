@@ -19,6 +19,7 @@
 import {
   TEXT,
   moveAlias,
+  slotOffset,
   sortTarget,
   renderBanners,
   renderEditDialog,
@@ -28,6 +29,11 @@ import {
   renderTabs,
   tabsFor
 } from './panel-view.js';
+
+/** Drag motion, shared by the stylesheet and the drop timer: rows sliding out of the way, and the dropped row settling. */
+const SLIDE_MS = 200;
+const SETTLE_MS = 160;
+const EASE = 'cubic-bezier(.2,.8,.2,1)';
 
 const STYLES = `
 :host{
@@ -72,7 +78,7 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
 .note{font-size:12px;color:var(--fg2);line-height:18px}
 .chips{display:inline-flex;gap:6px;margin-left:4px;vertical-align:middle}
 .empty{padding:28px 16px;text-align:center;color:var(--fg2);border:1px dashed var(--b1);border-radius:12px}
-.list{border:1px solid var(--b1);border-radius:12px;background:var(--l1);overflow:hidden}
+.list,.host-table{border:1px solid var(--b1);border-radius:12px;background:var(--l1);overflow:hidden}
 .row{display:flex;align-items:center;gap:12px;padding:10px 14px;min-height:56px}
 .row+.row{border-top:1px solid var(--b1)}
 .who{flex:0 0 210px;min-width:0}
@@ -107,54 +113,40 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
 .knob{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--fg2);transition:transform .14s ease,background .14s ease}
 .switch[aria-checked="true"]{background:var(--ok);border-color:var(--ok)}
 .switch[aria-checked="true"] .knob{transform:translateX(16px);background:#fff}
-.switch.neutral[aria-checked="true"]{background:var(--l2);border-color:var(--b2)}
-.switch.neutral[aria-checked="true"] .knob{background:var(--fg)}
-.toggle-label{font-size:12px;color:var(--fg2);opacity:.6}
-.toggle-label.on{opacity:1;color:var(--fg)}
-.num{width:84px;height:30px;padding:0 8px;text-align:center;border:1px solid var(--b1);border-radius:8px;background:var(--bg)}
+.num{width:84px;height:30px;padding:0 8px;text-align:center;border:1px solid var(--b1);border-radius:8px;background:var(--bg);-moz-appearance:textfield;appearance:textfield;font-variant-numeric:tabular-nums}
 .text{width:100%;height:32px;padding:0 10px;border:1px solid var(--b1);border-radius:8px;background:var(--bg)}
-.num{-moz-appearance:textfield;appearance:textfield;font-variant-numeric:tabular-nums}
 .num::-webkit-inner-spin-button,.num::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 .num::placeholder,.text::placeholder{color:var(--fg2);opacity:.7}
 .num:focus,.text:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 20%,transparent)}
 .field{display:flex;flex-direction:column;gap:6px}
 .field>span{font-size:12px;color:var(--fg2);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
 .pane.wide{max-width:none}
-.host-table{border:1px solid var(--b1);border-radius:12px;background:var(--l1);overflow:hidden}
-.host-cols{display:grid;grid-template-columns:28px minmax(110px,1fr) minmax(170px,1.1fr) minmax(0,1.3fr) auto;grid-template-areas:"grip name addr state act" ". meta meta meta meta";column-gap:12px;row-gap:8px;align-items:center;padding:10px 12px 12px 8px}
+.host-table{--row-pad:8px;--grip-w:28px;--col-gap:12px}
+.host-cols{display:grid;grid-template-columns:var(--grip-w) minmax(110px,1fr) minmax(170px,1.1fr) minmax(0,1.3fr) auto;grid-template-areas:"grip name addr state act" ". meta meta meta meta";column-gap:var(--col-gap);row-gap:8px;align-items:center;padding:10px 12px 12px var(--row-pad)}
 .host-header{display:none}
-.hosts{position:relative}
+.host-header .dot{visibility:hidden}
 .host{position:relative;background:var(--l1);border-top:1px solid var(--b1)}
 .host:first-child{border-top:0}
 .host-line{font-size:12.5px}
 .host:hover .host-line{background:color-mix(in srgb,var(--l2) 45%,transparent)}
 .host.is-hidden .host-name .name{color:var(--fg2)}
 .host.is-hidden .c-addr,.host.is-hidden .c-key,.host.is-hidden .c-state{opacity:.6}
-.grip{grid-area:grip}
-.host-name{grid-area:name}
+.host-name{grid-area:name;display:flex;align-items:center;gap:8px;min-width:0}
 .c-addr{grid-area:addr}
-.c-key{grid-area:key}
-.c-hk{grid-area:hk}
 .c-state{grid-area:state}
-.c-vis{grid-area:vis}
-.c-idle{grid-area:idle}
-.c-remark{grid-area:remark}
 .c-act{grid-area:act}
 .host-meta{grid-area:meta;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}
 .host-meta .cell{display:flex;align-items:center;gap:8px}
-.host-meta .c-key{flex:0 0 176px}
-.host-meta .c-hk{flex:0 0 176px}
+.host-meta .c-key,.host-meta .c-hk{flex:0 0 176px}
 .host-meta .c-vis{flex:0 0 92px}
 .host-meta .c-idle{flex:0 0 196px}
 .host-meta .c-remark{flex:1 1 220px;min-width:180px}
 .host-meta .c-remark .text{flex:1;width:auto;min-width:0}
 .lbl{flex:0 0 auto;font-size:11.5px;color:var(--fg2)}
 .cell{min-width:0}
-.cell.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cell.inline{display:flex;align-items:center;gap:6px}
 .cell .num{width:76px;height:28px}
 .cell .text{height:28px;font-size:12px}
-.host-name{display:flex;align-items:center;gap:8px;min-width:0}
 .host-name .name{font-weight:600;font-size:13px}
 .state-cell{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;min-width:0}
 .state-text{min-width:0;white-space:normal}
@@ -165,25 +157,21 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
 .chip.err:hover{background:color-mix(in srgb,var(--err) 16%,transparent)}
 .row-actions{display:grid;grid-template-columns:56px 44px 26px;gap:4px;justify-content:end;align-items:center}
 .row-actions .btn{width:100%;padding:0}
-.row-actions .slot{display:block}
-.expand svg{transition:transform .16s ease}
 .host.open .expand svg{transform:rotate(90deg)}
 .mono{font:12px/18px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-.grip{display:inline-flex;align-items:center;justify-content:center;width:24px;height:30px;padding:0;border:0;border-radius:6px;background:none;color:var(--fg2);cursor:grab;touch-action:none;opacity:.45}
+.grip{grid-area:grip;display:inline-flex;align-items:center;justify-content:center;width:24px;height:30px;padding:0;border:0;border-radius:6px;background:none;color:var(--fg2);cursor:grab;touch-action:none;opacity:.45}
 .host:hover .grip,.grip:focus-visible{opacity:1}
 .grip:hover{background:var(--l2);color:var(--fg)}
-.grip:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
-.host-detail{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 24px;padding:12px 16px 16px 48px;border-top:1px dashed var(--b1);background:color-mix(in srgb,var(--l2) 35%,transparent)}
+.host-detail{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 24px;padding:12px 16px 16px calc(var(--row-pad) + var(--grip-w) + var(--col-gap));border-top:1px dashed var(--b1);background:color-mix(in srgb,var(--l2) 35%,transparent)}
 .detail-block{display:flex;flex-direction:column;gap:6px;min-width:0}
 .cmd-line{display:flex;align-items:center;gap:8px;min-width:0}
 .cmd-inline{flex:1;min-width:0;padding:5px 8px;border-radius:7px;background:var(--l2);font:11.5px/16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hosts.sorting{user-select:none;cursor:grabbing}
 .hosts.sorting .grip{cursor:grabbing}
-.hosts.sorting .host{transition:transform .2s cubic-bezier(.2,.8,.2,1)}
+.hosts.sorting .host{transition:transform ${SLIDE_MS}ms ${EASE}}
 .hosts.sorting .host.dragging{transition:none;z-index:3;box-shadow:0 10px 28px rgba(0,0,0,.18),0 0 0 1px var(--brand);border-radius:8px}
 .hosts.sorting .host.dragging .host-line{background:var(--l1)}
-.hosts .host.settling{transition:transform .16s cubic-bezier(.2,.8,.2,1);z-index:3}
-.hosts.no-motion .host{transition:none!important}
+.hosts .host.settling{transition:transform ${SETTLE_MS}ms ${EASE};z-index:3}
 .mosaic{display:inline-block;height:1.05em;min-width:4.5em;max-width:100%;vertical-align:-.18em;border-radius:4px;background-color:var(--mosaic-a);background-image:linear-gradient(45deg,var(--mosaic-b) 25%,transparent 25%,transparent 75%,var(--mosaic-b) 75%),linear-gradient(45deg,var(--mosaic-b) 25%,transparent 25%,transparent 75%,var(--mosaic-b) 75%);background-size:7px 7px;background-position:0 0,3.5px 3.5px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fg) 8%,transparent)}
 .block-title{font-size:12px;font-weight:600;color:var(--fg2);display:flex;align-items:center;gap:6px}
 .proc{display:flex;align-items:center;gap:8px;font-size:12.5px}
@@ -228,24 +216,23 @@ code{font:11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .dialog-actions{display:flex;justify-content:flex-end;gap:8px}
 .loading{padding:40px;text-align:center;color:var(--fg2)}
 @container (min-width:1320px){
-  .host-cols{grid-template-columns:28px minmax(110px,1fr) 170px 100px 112px minmax(170px,1.4fr) 56px 116px minmax(120px,1.3fr) 140px;grid-template-areas:"grip name addr key hk state vis idle remark act";row-gap:0;padding:0 12px 0 8px}
+  .host-cols{grid-template-columns:var(--grip-w) minmax(110px,1fr) 170px 100px 112px minmax(170px,1.4fr) 56px 116px minmax(120px,1.3fr) 140px;grid-template-areas:"grip name addr key hk state vis idle remark act";row-gap:0;padding:0 12px 0 var(--row-pad)}
   .host-header{display:grid;height:34px;font-size:11.5px;font-weight:500;color:var(--fg2);background:var(--l2);border-bottom:1px solid var(--b1);white-space:nowrap}
   .host-line{min-height:52px}
   .host-meta{display:contents}
+  .c-key{grid-area:key}.c-hk{grid-area:hk}.c-vis{grid-area:vis}.c-idle{grid-area:idle}.c-remark{grid-area:remark}
   .host-meta .cell{display:block}
   .host-meta .cell.inline{display:flex;gap:6px}
   .host-meta .c-remark{min-width:0}
   .host-meta .c-remark .text{width:100%}
-  .host-header>:nth-child(2){padding-left:17px}
   .lbl{display:none}
   .state-cell{flex-wrap:nowrap}
   .state-text{white-space:nowrap}
 }
 @container (max-width:760px){
-  .host-cols{grid-template-columns:28px minmax(0,1fr) auto;grid-template-areas:"grip name act" ". addr addr" ". state state" ". meta meta";padding:10px 10px 12px 6px}
-  .host-detail{padding-left:44px}
+  .host-table{--row-pad:6px}
+  .host-cols{grid-template-columns:var(--grip-w) minmax(0,1fr) auto;grid-template-areas:"grip name act" ". addr addr" ". state state" ". meta meta";padding:10px 10px 12px var(--row-pad)}
   .host-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}
-  .host-meta>.cell{grid-area:auto}
   .host-meta>.c-remark{grid-column:1/-1}
 }
 @container (max-width:720px){
@@ -254,12 +241,12 @@ code{font:11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   .top{padding:12px 16px 8px}.tabs{padding:0 12px}.pane{padding:14px 16px 20px}
   .actions .label{display:none}.actions .btn{width:30px;padding:0}
 }
+@container (max-width:520px){
+  .row{flex-wrap:wrap}.what{flex-basis:100%;order:3;padding-left:21px}.who{flex:1 1 auto}
+}
 @container (max-width:400px){
   .host-meta{grid-template-columns:minmax(0,1fr)}
   .host-meta .lbl{flex:0 0 64px}
-}
-@container (max-width:520px){
-  .row{flex-wrap:wrap}.what{flex-basis:100%;order:3;padding-left:21px}.who{flex:1 1 auto}
 }
 `;
 
@@ -293,6 +280,9 @@ class SshHelperPanel extends HTMLElement {
     this.onVisibility = () => {
       if (!document.hidden) void this.load(true);
     };
+    this.onDragKey = (event) => {
+      if (event.key === 'Escape') this.endDrag(false);
+    };
     this.wire();
   }
 
@@ -322,6 +312,7 @@ class SshHelperPanel extends HTMLElement {
     clearInterval(this.timer);
     this.timer = undefined;
     document.removeEventListener('visibilitychange', this.onVisibility);
+    document.removeEventListener('keydown', this.onDragKey);
   }
 
   attributeChangedCallback() {
@@ -399,9 +390,9 @@ class SshHelperPanel extends HTMLElement {
     // or the focusout catch-up would rebuild the form between the Save
     // button's mousedown and mouseup, dropping both the click and the typed
     // names.
-    // A drag moves cards in the DOM itself; a redraw mid-drag would undo it.
+    // A drag moves rows with transforms; a redraw mid-drag would drop them.
     if (!force && (this.editing() || this.dialog || this.drag)) return;
-    const options = { mode: this.mode, expanded: [...(this.expanded ?? [])] };
+    const options = { mode: this.mode, expanded: this.expanded };
     if (!tabsFor(this.mode).includes(this.tab)) this.tab = 'hosts';
     const bodyScroll = this.shadowRoot.querySelector('.body')?.scrollTop ?? 0;
     // A redraw replaces every node: keep a focused drag handle focused, so a
@@ -442,7 +433,7 @@ class SshHelperPanel extends HTMLElement {
    * Pointer drag on a row's handle (mouse, pen and touch alike). The dragged
    * row follows the pointer; the rows it passes slide out of the way (CSS
    * transitions on `transform`); on release it glides into its slot and only
-   * then is the DOM reordered and the order saved. Row geometry is measured
+   * then is the order saved and the list redrawn. Row geometry is measured
    * once at the start, so moving never forces a layout.
    */
   startDrag(event, handle) {
@@ -451,18 +442,22 @@ class SshHelperPanel extends HTMLElement {
     const body = this.shadowRoot.querySelector('.body');
     if (!row || !list || !body || event.button !== 0 || this.drag) return;
     event.preventDefault();
+    // The handle does not take focus, so a keydown may never reach this
+    // shadow root: Escape is heard on the document while the drag lasts.
+    document.addEventListener('keydown', this.onDragKey);
     try {
       handle.setPointerCapture?.(event.pointerId);
     } catch {
       /* drag without capture */
     }
-    const rows = [...list.children].filter((child) => child.classList.contains('host'));
+    const rows = [...list.children];
     const boxes = rows.map((child) => {
       const box = child.getBoundingClientRect();
       return { top: box.top, height: box.height };
     });
     const from = rows.indexOf(row);
-    this.drag = { row, list, body, rows, boxes, from, index: from, pointerId: event.pointerId, startY: event.clientY, y: event.clientY, scroll0: body.scrollTop, scrolling: false, settling: false };
+    // `originY` is the pointer's start in list coordinates, so auto-scrolling moves the row too.
+    this.drag = { row, body, rows, boxes, from, index: from, pointerId: event.pointerId, originY: event.clientY + body.scrollTop, y: event.clientY, scrolling: false, settling: false };
     list.classList.add('sorting');
     row.classList.add('dragging');
   }
@@ -479,16 +474,13 @@ class SshHelperPanel extends HTMLElement {
   layoutDrag() {
     const drag = this.drag;
     if (!drag) return;
-    const first = drag.boxes[0];
-    const last = drag.boxes.at(-1);
-    const own = drag.boxes[drag.from];
-    const raw = drag.y - drag.startY + (drag.body.scrollTop - drag.scroll0);
-    // Keep the row inside the table.
-    const dy = Math.max(first.top - own.top, Math.min(last.top + last.height - own.top - own.height, raw));
+    const { boxes, from } = drag;
+    // Keep the row inside the table: between the first and the last slot.
+    const dy = Math.max(slotOffset(boxes, from, 0), Math.min(slotOffset(boxes, from, boxes.length - 1), drag.y + drag.body.scrollTop - drag.originY));
     drag.row.style.transform = `translate3d(0, ${dy}px, 0)`;
-    const { index, shifts } = sortTarget(drag.boxes, drag.from, dy);
+    const { index, shifts } = sortTarget(boxes, from, dy);
     drag.rows.forEach((row, i) => {
-      if (i !== drag.from) row.style.transform = shifts[i] ? `translate3d(0, ${shifts[i]}px, 0)` : '';
+      if (i !== from) row.style.transform = shifts[i] ? `translate3d(0, ${shifts[i]}px, 0)` : '';
     });
     drag.index = index;
   }
@@ -521,38 +513,28 @@ class SshHelperPanel extends HTMLElement {
   }
 
   /**
-   * Release (or cancel): glide the row into its slot, then reorder the DOM and
-   * clear every transform in one frame with transitions off, so nothing jumps.
+   * Drop (`commit`) or cancel: glide the row into its slot (the passed rows
+   * slide back on cancel), then save the order or just redraw. The redraw
+   * replaces every node, so no transform or class has to be undone by hand.
    */
-  endDrag(event, { cancel = false } = {}) {
+  endDrag(commit) {
     const drag = this.drag;
-    if (!drag || drag.settling || (event && event.pointerId !== drag.pointerId)) return;
-    const target = cancel || event?.type === 'pointercancel' ? drag.from : drag.index;
+    if (!drag || drag.settling) return;
+    document.removeEventListener('keydown', this.onDragKey);
+    const { row, rows, from } = drag;
+    const target = commit ? drag.index : from;
     drag.settling = true;
-    const { boxes, from } = drag;
-    const offset = target > from ? boxes[target].top + boxes[target].height - boxes[from].top - boxes[from].height : target < from ? boxes[target].top - boxes[from].top : 0;
-    drag.row.classList.remove('dragging');
-    drag.row.classList.add('settling');
-    drag.row.style.transform = offset === 0 ? '' : `translate3d(0, ${offset}px, 0)`;
-    if (target === from) for (const row of drag.rows) if (row !== drag.row) row.style.transform = '';
-    const finish = () => {
-      if (this.drag !== drag) return;
-      drag.list.classList.add('no-motion');
-      for (const row of drag.rows) row.style.transform = '';
-      drag.row.classList.remove('settling');
-      drag.list.classList.remove('sorting');
-      if (target !== from) {
-        const anchor = drag.rows[target];
-        drag.list.insertBefore(drag.row, target > from ? anchor.nextSibling : anchor);
-      }
-      void drag.list.offsetHeight;
-      drag.list.classList.remove('no-motion');
+    const offset = slotOffset(drag.boxes, from, target);
+    row.classList.remove('dragging');
+    row.classList.add('settling');
+    row.style.transform = offset === 0 ? '' : `translate3d(0, ${offset}px, 0)`;
+    if (target === from) for (const other of rows) if (other !== row) other.style.transform = '';
+    setTimeout(() => {
       this.drag = null;
-      const order = [...drag.list.children].filter((child) => child.classList.contains('host')).map((child) => child.dataset.alias);
-      if (target !== from) void this.saveOrder(order);
-      else this.render(true);
-    };
-    setTimeout(finish, 170);
+      if (target === from) return this.render(true);
+      const aliases = rows.map((child) => child.dataset.alias);
+      void this.saveOrder(moveAlias(aliases, aliases[from], target - from));
+    }, Math.max(SLIDE_MS, SETTLE_MS));
   }
 
   // ── interaction ─────────────────────────────────────────────────────────
@@ -600,9 +582,13 @@ class SshHelperPanel extends HTMLElement {
       if (handle) this.startDrag(event, handle);
     });
     root.addEventListener('pointermove', (event) => this.moveDrag(event));
-    root.addEventListener('pointerup', (event) => this.endDrag(event));
-    root.addEventListener('pointercancel', (event) => this.endDrag(event));
-    root.addEventListener('lostpointercapture', (event) => this.endDrag(event, { cancel: true }));
+    // Releasing drops the row in its new slot; a cancelled or lost pointer puts it back.
+    const release = (commit) => (event) => {
+      if (event.pointerId === this.drag?.pointerId) this.endDrag(commit);
+    };
+    root.addEventListener('pointerup', release(true));
+    root.addEventListener('pointercancel', release(false));
+    root.addEventListener('lostpointercapture', release(false));
     root.addEventListener('mousedown', (event) => {
       if (event.target instanceof Element && event.target.matches('[data-dialog-backdrop]') && !this.dialog?.saving) this.closeDialog();
     });
@@ -628,12 +614,12 @@ class SshHelperPanel extends HTMLElement {
     });
     root.addEventListener('keydown', (event) => {
       const target = event.target;
+      // Escape during a drag is handled by `onDragKey`.
       if (event.key === 'Escape') {
-        if (this.drag) this.endDrag(null, { cancel: true });
-        else if (this.dialog && !this.dialog.saving) this.closeDialog();
+        if (!this.drag && this.dialog && !this.dialog.saving) this.closeDialog();
         return;
       }
-      // A focused drag handle moves its card with the arrow keys.
+      // A focused drag handle moves its row with the arrow keys.
       const handle = target instanceof Element ? target.closest('[data-drag-handle]') : null;
       if (handle && !this.drag) {
         const delta = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1, Home: -Infinity, End: Infinity }[event.key];
