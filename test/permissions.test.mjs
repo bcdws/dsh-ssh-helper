@@ -62,10 +62,10 @@ const hiddenRun = await failureOf(byName.get('ssh_run').execute({ host: 'hidden-
 check('hidden-run-unknown', /unknown ssh host "hidden-host"/.test(hiddenRun), hiddenRun);
 
 // ── protected write targets, before any connection work ────────────────────
-const blockWrite = await failureOf(byName.get('ssh_write').execute({ host: 'open-host', path: '/dev/sda', content: 'x' }));
-check('write-block-device-denied', /写入块设备/.test(blockWrite), blockWrite);
-const bootEdit = await failureOf(byName.get('ssh_edit').execute({ host: 'open-host', path: '/boot/grub/grub.cfg', sha256: 'a'.repeat(64), oldString: 'a', newString: 'b' }));
-check('edit-boot-denied', /写入系统关键路径/.test(bootEdit), bootEdit);
+const bootUpload = await failureOf(byName.get('ssh_transfer').execute({ host: 'open-host', direction: 'upload', localPath: '/tmp/x', remotePath: '/boot/grub/grub.cfg' }, {}));
+check('upload-boot-denied', /写入系统关键路径/.test(bootUpload), bootUpload);
+const shadowUpload = await failureOf(byName.get('ssh_transfer').execute({ host: 'open-host', direction: 'upload', localPath: '/tmp/x', remotePath: '/etc/shadow' }, {}));
+check('upload-account-file-denied', /账户文件/.test(shadowUpload), shadowUpload);
 const upload = await failureOf(byName.get('ssh_transfer').execute({ host: 'open-host', direction: 'upload', localPath: '/tmp/x', remotePath: '/dev/sda' }, {}));
 check('upload-block-device-denied', /写入块设备/.test(upload), upload);
 check('no-write-attempted', seen.writes.length === 0 && seen.transfers.length === 0, JSON.stringify(seen));

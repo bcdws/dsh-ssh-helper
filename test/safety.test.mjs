@@ -29,7 +29,7 @@ const refused = [
   ['find-root-delete', 'find / -delete'],
   ['find-etc-delete', "find /etc -name '*.conf' -delete"],
   ['cd-root-wildcard', 'cd / && rm -rf *'],
-  ['cd-etc-relative', 'cd /etc && rm -rf nginx'],
+  ['cd-etc-ssh', 'cd /etc && rm -rf ssh'],
   ['cd-var-relative', 'cd /var && rm -rf lib'],
   ['mv-etc', 'mv /etc /tmp/backup'],
   ['sudo-wrapper', 'sudo rm -rf /usr'],
@@ -54,7 +54,83 @@ const refused = [
   ['truncate-device', 'truncate -s 0 /dev/sda'],
   ['sed-in-place-etc', "sed -i 's/x/y/' /etc/passwd"],
   ['chmod-recursive-etc', 'chmod -R 000 /etc'],
-  ['chown-recursive-root', 'chown -R nobody /']
+  ['chown-recursive-root', 'chown -R nobody /'],
+  // Wildcards and braces are judged by what they can match.
+  ['glob-question', 'rm -rf /e?c'],
+  ['glob-class', 'rm -rf /e[t]c'],
+  ['glob-prefix', 'rm -rf /et*'],
+  ['glob-short', 'rm -rf /u*'],
+  ['glob-double-star', 'rm -rf /**'],
+  ['glob-two-levels', 'rm -rf /*/*'],
+  ['glob-etc-contents', 'rm -f /etc/*'],
+  ['glob-etc-dot-d', 'rm -rf /etc/*.d'],
+  ['glob-libc', 'rm -f /usr/lib/x86_64-linux-gnu/libc*'],
+  ['glob-var-contents', 'rm -rf /var/*'],
+  ['brace-roots', 'rm -rf /{etc,usr}'],
+  ['brace-etc-children', 'rm -rf /etc/{nginx,ssh}'],
+  ['ansi-c-quote', "rm -rf $'/etc'"],
+  // Variables: assigned in the command, from a for list, or unset (empty).
+  ['var-assigned', 'D=/etc; rm -rf $D'],
+  ['var-for-list', 'for d in /srv/a /usr/lib; do rm -rf $d; done'],
+  ['var-for-glob', 'for f in /etc/*; do rm -rf "$f"; done'],
+  ['var-default', 'rm -rf ${TARGET:-/etc}'],
+  ['var-home-parent', 'rm -rf $HOME/..'],
+  // A chain or pipeline that resolves to a system tree.
+  ['pushd-wildcard', 'pushd /etc && rm -rf *'],
+  ['subshell-cd', '(cd /usr/lib && rm -rf *)'],
+  ['nested-cd', "bash -lc 'cd /etc && rm -rf *'"],
+  ['xargs-echo', 'echo /etc | xargs rm -rf'],
+  ['xargs-ls-d', 'ls -d /usr/lib | xargs rm -rf'],
+  ['xargs-find', 'find /etc -type f -print0 | xargs -0 rm -f'],
+  ['find-execdir', 'find /usr/lib/x86_64-linux-gnu -execdir rm {} +'],
+  ['find-exec-path', 'find /etc -exec /bin/rm -f {} +'],
+  ['find-relative-root', 'cd /etc && find . -delete'],
+  ['rsync-del-alias', 'rsync -a --del /tmp/empty/ /etc/'],
+  ['rsync-remove-source', 'rsync -a --remove-source-files /etc/ /backup/etc/'],
+  // Critical files, single and precise.
+  ['rm-passwd', 'rm -f /etc/passwd'],
+  ['mv-shadow', 'mv /etc/shadow /tmp/'],
+  ['rm-libc', 'rm -f /usr/lib/x86_64-linux-gnu/libc.so.6'],
+  ['rm-bash', 'rm -f /usr/bin/bash'],
+  ['rm-sshd', 'rm -f /usr/sbin/sshd'],
+  ['rm-etc-ssh', 'rm -rf /etc/ssh'],
+  ['rm-systemd-lib', 'rm -rf /usr/lib/systemd'],
+  ['rm-multiarch', 'rm -rf /lib/x86_64-linux-gnu'],
+  ['rm-boot-file', 'rm -f /boot/vmlinuz'],
+  ['tee-passwd', 'echo x | tee /etc/passwd'],
+  ['tee-glob-etc', 'echo x | tee /etc/*'],
+  ['truncate-fstab', 'truncate -s 0 /etc/fstab'],
+  ['redirect-fstab', 'echo x > /etc/fstab'],
+  ['redirect-fd-shadow', 'cmd 2>/etc/shadow'],
+  ['redirect-libc', ': > /lib/x86_64-linux-gnu/libc.so.6'],
+  ['sed-shadow', "sed -i.bak '/^root/d' /etc/shadow"],
+  ['dd-of-passwd', 'dd if=/dev/zero of=/etc/passwd bs=1 count=1'],
+  // Writing a disk without dd.
+  ['cp-to-disk', 'cp disk.img /dev/sda'],
+  ['ddrescue-to-disk', 'ddrescue disk.img /dev/nvme0n1'],
+  ['tee-to-disk', 'cat disk.img | tee /dev/sdb'],
+  ['blkdiscard', 'blkdiscard /dev/sda'],
+  ['sgdisk-zap', 'sgdisk --zap-all /dev/sda'],
+  ['gdisk', 'gdisk /dev/sda'],
+  ['cfdisk', 'cfdisk /dev/sda'],
+  ['mke2fs', 'mke2fs /dev/sda1'],
+  ['mkdosfs', 'mkdosfs /dev/sdb1'],
+  ['mkswap-device', 'mkswap /dev/sdb2'],
+  ['nvme-format', 'nvme format /dev/nvme0n1'],
+  ['luks-format', 'cryptsetup luksFormat /dev/sda2'],
+  ['vgremove', 'vgremove -f vg0'],
+  ['pvremove', 'pvremove -ff /dev/sda2'],
+  ['zpool-destroy', 'zpool destroy tank'],
+  ['zfs-destroy-pool', 'zfs destroy -r tank'],
+  ['mdadm-zero', 'mdadm --zero-superblock /dev/sda1'],
+  ['hdparm-erase', 'hdparm --security-erase p /dev/sda'],
+  ['badblocks-write', 'badblocks -w /dev/sda'],
+  ['format-via-wrapper', 'timeout 60s wipefs -a /dev/sdb'],
+  // Forced removal of essential packages.
+  ['dpkg-force-essential', 'dpkg --purge --force-remove-essential libc6'],
+  ['apt-allow-essential', 'apt-get remove -y --allow-remove-essential systemd'],
+  ['rpm-nodeps-glibc', 'rpm -e --nodeps glibc'],
+  ['yum-remove-glibc', 'yum remove -y glibc']
 ];
 for (const [name, command] of refused) check(`refuse-${name}`, denied(command), JSON.stringify(verdict(command)));
 
@@ -91,9 +167,87 @@ const ordinary = [
   ['chmod-srv', 'chmod -R 755 /srv/app'],
   ['chown-www', 'chown -R www-data /var/www'],
   ['find-log-delete', "find /var/log -name '*.gz' -delete"],
-  ['rsync-backup', 'rsync -a /srv/app/ /backup/app/']
+  ['rsync-backup', 'rsync -a /srv/app/ /backup/app/'],
+  // Application config under /etc and anything under /usr/local is ordinary work.
+  ['append-sysctl', 'echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf'],
+  ['append-hosts', "echo '192.0.2.10 db' >> /etc/hosts"],
+  ['heredoc-unit', "cat > /etc/systemd/system/app.service <<'EOF'\n[Unit]\nDescription=app\nEOF"],
+  ['heredoc-nginx', "cat > /etc/nginx/conf.d/app.conf <<'EOF'\nserver {}\nEOF"],
+  ['tee-nginx', 'tee /etc/nginx/conf.d/app.conf < /tmp/app.conf'],
+  ['sed-sshd-config', "sed -i 's/^#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config"],
+  ['sed-fstab-swap', "sed -i '/ swap / s/^/#/' /etc/fstab"],
+  ['append-fstab', "echo '/dev/vdb1 /data ext4 defaults 0 2' >> /etc/fstab"],
+  ['redirect-motd', '> /etc/motd'],
+  ['truncate-motd', 'truncate -s 0 /etc/motd'],
+  ['rm-localtime', 'rm -f /etc/localtime && ln -s /usr/share/zoneinfo/Asia/Shanghai /etc/localtime'],
+  ['rm-resolv', 'rm -f /etc/resolv.conf'],
+  ['rm-nginx-sites', 'rm -f /etc/nginx/sites-enabled/*'],
+  ['rm-nginx-conf-glob', 'rm -f /etc/nginx/conf.d/*.conf'],
+  ['mv-yum-repos', 'mv /etc/yum.repos.d/*.repo /tmp/repo-bak/'],
+  ['rm-letsencrypt', 'rm -rf /etc/letsencrypt/live/old.example.com'],
+  ['cd-etc-nginx', 'cd /etc && rm -rf nginx'],
+  ['mv-nginx-dir', 'mv /etc/nginx /etc/nginx.bak'],
+  ['go-install', 'rm -rf /usr/local/go && tar -C /usr/local -xzf go1.22.linux-amd64.tar.gz'],
+  ['usr-local-bin', "printf '#!/bin/sh\\necho hi\\n' > /usr/local/bin/hello"],
+  ['usr-local-curl', 'curl -fsSL https://example.com/x.sh > /usr/local/bin/x'],
+  ['usr-local-rm', 'rm -rf /usr/local/lib/node_modules/pm2'],
+  ['usr-share-nginx', 'rm -rf /usr/share/nginx/html/*'],
+  ['chown-usr-local', 'chown -R deploy:deploy /usr/local/app'],
+  ['chmod-usr-local-bin', 'chmod -R 755 /usr/local/bin'],
+  ['chown-nginx-conf', 'chown -R www-data /etc/nginx'],
+  ['chmod-root-home', 'chmod -R go-rwx /root'],
+  ['mv-python-link', 'mv /usr/bin/python /usr/bin/python.bak'],
+  ['rm-old-modules', 'rm -rf /lib/modules/5.4.0-old-generic'],
+  ['rm-dpkg-lock', 'rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock'],
+  ['rm-dpkg-lock-glob', 'rm -f /var/lib/dpkg/lock*'],
+  ['rm-var-log-glob', 'rm -f /var/log/*.gz'],
+  ['rm-root-tarballs', 'rm -f /root/*.tar.gz'],
+  // Runtime tunables are not the disk.
+  ['drop-caches', 'echo 3 > /proc/sys/vm/drop_caches'],
+  ['ip-forward', 'echo 1 > /proc/sys/net/ipv4/ip_forward'],
+  ['thp', 'echo never > /sys/kernel/mm/transparent_hugepage/enabled'],
+  // Images and swap files are files; listings and installs touch no disk.
+  ['mkswap-file', 'fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile'],
+  ['mkfs-image', 'mkfs.ext4 -F /srv/disk.img'],
+  ['parted-image', 'parted -s /srv/disk.img mklabel gpt'],
+  ['sgdisk-print', 'sgdisk -p /dev/sda'],
+  ['gdisk-list', 'gdisk -l /dev/sda'],
+  ['badblocks-read', 'badblocks -sv /dev/sda'],
+  ['install-parted', 'apt-get install -y parted gdisk'],
+  ['man-fdisk', 'man fdisk'],
+  ['fdisk-help', 'fdisk --help'],
+  ['zfs-snapshot', 'zfs destroy tank/data@2026-01-01'],
+  ['lvremove-snapshot', 'lvremove -f /dev/vg0/backup-snap'],
+  ['cp-disk-backup', 'cp /dev/sda /srv/backup/disk.img'],
+  ['yum-remove-pkg', 'yum remove -y httpd'],
+  ['rpm-nodeps-other', 'rpm -e --nodeps httpd'],
+  // Shapes that only look like a removal.
+  ['rm-quiet-redirect', 'rm -rf /srv/app/cache > /dev/null'],
+  ['docker-rm-flag', 'docker run --rm -v /etc/nginx:/etc/nginx nginx'],
+  ['grep-for-rm', 'grep -rn "rm -rf" /srv/app'],
+  ['var-guarded', 'rm -rf "${APP_DIR:?}"/*'],
+  ['var-assigned-business', 'APP=/srv/app; rm -rf $APP/*'],
+  ['var-unset-business', 'rm -rf $BUILD/node_modules'],
+  ['var-from-substitution', 'D=$(mktemp -d); rm -rf $D/*'],
+  ['relative-no-cwd', 'rm -rf *'],
+  ['nested-cd-business', "bash -c 'cd /srv/app && rm -rf *'"]
 ];
 for (const [name, command] of ordinary) check(`allow-${name}`, allowed(command), JSON.stringify(verdict(command)));
+
+// ── the shell context: session cwd, cwd argument, exports, home ─────────────
+const inShell = (command, shell) => policy.evaluate({ command, ...shell });
+check('cwd-system-wildcard', inShell('rm -rf *', { cwd: '/etc' }).action === 'deny', JSON.stringify(inShell('rm -rf *', { cwd: '/etc' })));
+check('cwd-business-wildcard', inShell('rm -rf *', { cwd: '/srv/app' }).action === 'allow', JSON.stringify(inShell('rm -rf *', { cwd: '/srv/app' })));
+check('cwd-relative-child', inShell('rm -rf ssh', { cwd: '/etc' }).action === 'deny' && inShell('rm -rf nginx', { cwd: '/etc' }).action === 'allow', 'relative names resolve against the session directory');
+check('cwd-then-cd', inShell('cd /srv/app && rm -rf *', { cwd: '/etc' }).action === 'allow', JSON.stringify(inShell('cd /srv/app && rm -rf *', { cwd: '/etc' })));
+check('cwd-dotdot', inShell('rm -rf ../*', { cwd: '/etc/nginx' }).action === 'deny', JSON.stringify(inShell('rm -rf ../*', { cwd: '/etc/nginx' })));
+check('env-resolves', inShell('rm -rf $APP/*', { env: { APP: '/srv/app' } }).action === 'allow', JSON.stringify(inShell('rm -rf $APP/*', { env: { APP: '/srv/app' } })));
+check('env-system', inShell('rm -rf $APP', { env: { APP: '/usr/lib' } }).action === 'deny', JSON.stringify(inShell('rm -rf $APP', { env: { APP: '/usr/lib' } })));
+const unset = inShell('rm -rf "$APP_DIR"/*', {});
+check('unset-var-rule', unset.action === 'deny' && unset.rule === 'danger.empty-var-delete' && /\$\{VAR:\?\}/.test(unset.suggestion), JSON.stringify(unset));
+check('unset-var-root', inShell('rm -rf $BUILD/', {}).rule === 'danger.empty-var-delete', JSON.stringify(inShell('rm -rf $BUILD/', {})));
+check('home-non-root', inShell('rm -rf ~', { home: '/home/deploy' }).action === 'allow' && inShell('rm -rf ~', {}).action === 'deny', 'only root\'s home is protected');
+check('pwd-variable', inShell('rm -rf $PWD/*', { cwd: '/usr/lib' }).action === 'deny' && inShell('rm -rf $PWD/*', {}).action === 'allow', '$PWD follows the known directory');
 
 // A command hidden in a script file is outside a text guard's view; a plain
 // shell invocation is not, so the common wrapper shapes stay covered.
@@ -104,15 +258,18 @@ check('wrapped-substitution', denied('echo $(rm -rf /etc)'), JSON.stringify(verd
 check('no-admin-layer', allowed('reboot') && allowed('visudo') && allowed('crontab -r'), 'admin commands must stay ordinary work');
 check('no-data-layer', allowed('rm -rf /var/lib/mysql') && allowed('psql -c "drop database app"'), 'data deletion is not a guard concern any more');
 
-// ── background logPath is a write target, guarded like the file tools ──────
-// `ssh_run`'s background mode writes a log at a caller-chosen path. Without
-// this check that path reached the remote shell unchecked, so a log could be
-// aimed at a block device or a system tree that `ssh_write` refuses.
+// ── upload targets (ssh_transfer) ───────────────────────────────────────────
+// An upload replaces a whole file, so it refuses what would scrap the machine:
+// block devices, /boot, /proc, /sys, the account files, core binaries, libc.
 const writeRefused = [
-  ['log-block-device', '/dev/sda'],
-  ['log-boot', '/boot/grub/grub.cfg'],
-  ['log-proc', '/proc/sys/kernel/hostname'],
-  ['log-sys', '/sys/kernel/x']
+  ['upload-block-device', '/dev/sda'],
+  ['upload-boot', '/boot/grub/grub.cfg'],
+  ['upload-proc', '/proc/sys/kernel/hostname'],
+  ['upload-sys', '/sys/kernel/x'],
+  ['upload-shadow', '/etc/shadow'],
+  ['upload-sudoers', '/etc/sudoers'],
+  ['upload-libc', '/usr/lib/x86_64-linux-gnu/libc.so.6'],
+  ['upload-bash', '/bin/bash']
 ];
 for (const [name, path] of writeRefused) {
   let blocked = null;
@@ -124,13 +281,14 @@ for (const [name, path] of writeRefused) {
   check(name, blocked !== null && /\[ssh-pool policy\]/.test(blocked.message), String(blocked?.message ?? 'allowed'));
 }
 
-// Ordinary log destinations stay ordinary work: business paths, /var/log, and
-// the plugin's own default directory.
+// Ordinary destinations stay ordinary work: business paths, app config, fstab.
 const writeAllowed = [
-  ['log-var-log', '/var/log/app/app.log'],
-  ['log-srv', '/srv/app/run.log'],
-  ['log-default-dir', '/root/.local/state/dsh-ssh/logs/web-2026-01-01_00-00-00-abc.log'],
-  ['log-home', '/home/deploy/app.log']
+  ['upload-var-log', '/var/log/app/app.log'],
+  ['upload-srv', '/srv/app/release.tar.gz'],
+  ['upload-nginx-conf', '/etc/nginx/conf.d/app.conf'],
+  ['upload-fstab', '/etc/fstab'],
+  ['upload-usr-local', '/usr/local/bin/app'],
+  ['upload-home', '/home/deploy/app.log']
 ];
 for (const [name, path] of writeAllowed) {
   let error = null;
@@ -142,15 +300,15 @@ for (const [name, path] of writeAllowed) {
   check(`allow-${name}`, error === null, String(error?.message ?? ''));
 }
 
-// A relative path carries no target to judge; the file tools let it through
-// and so does this check (the remote shell resolves it).
+// A relative path carries no target to judge (SFTP resolves it against the
+// login directory).
 let relativeError = null;
 try {
   assertWritePathAllowed({ host: 'h', path: 'logs/app.log' });
 } catch (thrown) {
   relativeError = thrown;
 }
-check('allow-log-relative', relativeError === null, String(relativeError?.message ?? ''));
+check('allow-upload-relative', relativeError === null, String(relativeError?.message ?? ''));
 
 console.log(`${pass}/${pass + failures.length} passed`);
 for (const failure of failures) console.log(`FAIL ${failure}`);

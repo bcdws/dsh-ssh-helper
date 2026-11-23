@@ -5,7 +5,7 @@
  *
  * Both surfaces — the DSH sidebar and the MCP management page — render from
  * these same functions, so this suite is what keeps the two from drifting:
- * every tab, host card, control, prod badge and dictionary key is checked
+ * every tab, host card, control, badge and dictionary key is checked
  * here. No browser: the element is imported with a two-line DOM stand-in and
  * only its non-DOM logic (fetch, credential retry, attributes) is exercised.
  */
@@ -16,6 +16,7 @@ import {
   diagnosticsCounters,
   esc,
   hostState,
+  moveAlias,
   renderBanners,
   renderDiagnostics,
   renderHostCard,
@@ -39,14 +40,14 @@ const web = {
   alias: 'web', host: '192.0.2.10', port: 22, user: 'root', keyName: 'id_web', source: 'ssh-config',
   state: 'ready', connected: true, connectedSeconds: 3660, idleSeconds: 5, connects: 3, reconnects: 1,
   failures: 0, handshakeTimeouts: 0, sessions: [{ name: 'main', ownerShort: 'dsh', commands: 3, idleSeconds: 20 }],
-  commands: 3, prod: true, hidden: false, remark: '生产 Web', idleTimeoutMs: null, effectiveIdleTimeoutMs: 30000,
+  commands: 3, hidden: false, remark: '生产 Web', idleTimeoutMs: null, effectiveIdleTimeoutMs: 30000,
   hostKey: { status: 'trusted', type: 'ssh-ed25519' }, lastCommand: 'uptime', lastCommandAgeSeconds: 5,
   callFailures: 0, lastFailure: null, instances: [{ pid: 111, state: 'ready', connected: true }]
 };
 const db = {
   alias: 'db', host: '192.0.2.11', port: 2222, user: 'deploy', keyName: null, source: 'config',
   state: 'idle', connected: false, connectedSeconds: 0, idleSeconds: null, connects: 0, reconnects: 0,
-  failures: 1, handshakeTimeouts: 0, sessions: [], commands: 0, retryPaused: true, prod: false, hidden: true,
+  failures: 1, handshakeTimeouts: 0, sessions: [], commands: 0, retryPaused: true, hidden: true,
   remark: '<b>', idleTimeoutMs: 60000, effectiveIdleTimeoutMs: 60000, lastError: 'ssh host "db" failed: timeout',
   lastFailure: { tool: 'ssh_run', code: 'connect_timeout', message: 'handshake timed out', ageSeconds: 12 },
   callFailures: 2, lastCommand: null, lastCommandAgeSeconds: null, instances: []
@@ -107,7 +108,7 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   const html = renderHosts(dsh, { mode: 'dsh' });
   check('host-cards', count(html, 'class="host"') === 2 && html.includes('class="hosts"'), `${count(html, 'class="host"')} cards`);
   check('no-side-panel', !html.includes('drawer') && !html.includes('data-select="') && !html.includes('class="row"'), 'the list must not open a side panel');
-  check('card-identity', html.includes('data-alias="web"') && html.includes('data-alias="db"') && html.includes('class="badge prod"') && html.includes('class="badge muted"'), 'identity and badges');
+  check('card-identity', html.includes('data-alias="web"') && html.includes('data-alias="db"') && html.includes('class="badge muted"'), 'identity and badges');
   check('card-address', html.includes('root@192.0.2.10:22') && html.includes('deploy@192.0.2.11:2222'), 'address line');
   const masked = renderHosts({ ...dsh, settings: { ...settings, maskAddresses: true } }, { mode: 'dsh' });
   check('card-address-masked', masked.includes('class="mosaic"') && !masked.includes('192.0.2.10') && !masked.includes('deploy@'), 'mask switch hides endpoints behind a mosaic');
@@ -117,8 +118,8 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   check('card-host-key', html.includes('trusted · ssh-ed25519'), 'host key');
   check('card-status', html.includes('已连接 · 已连 1 小时 1 分 · 1 会话 · 3 命令'), 'status line');
   check('card-counters', html.includes('3 次建连 · 1 次重连'), 'connect counters');
-  check('card-switches', count(html, 'data-toggle data-field="hidden"') === 2 && count(html, 'data-toggle data-field="prod"') === 2, 'per-card switches');
-  check('card-prod-state', /role="switch" aria-checked="true"[^>]*data-field="prod" data-alias="web"/.test(html) && /role="switch" aria-checked="false"[^>]*data-field="prod" data-alias="db"/.test(html), 'prod switch states');
+  check('card-switches', count(html, 'data-toggle data-field="hidden"') === 2 && count(html, 'data-toggle ') === 2, 'per-card switches: only hidden');
+  check('card-no-prod', !html.includes('data-field="prod"') && !html.includes('PROD') && !html.includes('生产服务器'), 'the prod label is gone');
   check('card-hidden-state', /role="switch" aria-checked="true"[^>]*data-field="hidden" data-alias="db"/.test(html), 'hidden switch states');
   check('card-inputs', count(html, 'data-meta-input data-field="idleTimeoutMs"') === 2 && count(html, 'data-meta-input data-field="remark"') === 2, 'per-card overrides');
   check('card-idle-value', /value="60"[^>]*data-field="idleTimeoutMs" data-alias="db"/.test(html), 'idle override in seconds');
@@ -129,11 +130,29 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   check('card-last-error', html.includes('ssh host &quot;db&quot; failed: timeout'), 'connect error also visible');
   check('card-last-command', html.includes(TEXT.lastCommand) && html.includes('uptime') && html.includes('5 秒前'), 'last command');
   check('card-sessions', html.includes(TEXT.sessions) && html.includes('main') && html.includes('空闲 20 秒'), 'sessions');
-  check('card-chips', html.includes('1 台隐藏') && html.includes('1 台生产'), 'summary chips');
+  check('card-chips', html.includes('1 台隐藏') && !html.includes('台生产'), 'summary chips');
   check('card-empty', renderHosts({ hosts: [] }, { mode: 'dsh' }).includes(TEXT.noHosts), 'empty state');
   check('card-note-dsh', html.includes(TEXT.hostsNoteDsh) && !html.includes(TEXT.hostsNoteMcp), 'dsh note');
   check('card-note-mcp', renderHosts(mcp, { mode: 'mcp' }).includes(TEXT.hostsNoteMcp), 'mcp note');
+  // One skeleton per card: a drag handle, then the same labels in the same order.
+  check('card-drag-handles', count(html, 'data-drag-handle data-alias=') === 2 && html.includes(`aria-label="${TEXT.dragHandle}：web"`), 'every card has a labelled handle');
+  const labelsOf = (card) => [...card.matchAll(/<div class="row-k">([^<]*)<\/div>/g)].map((match) => match[1]);
+  const webLabels = labelsOf(renderHostCard(web, { state: dsh, mode: 'dsh' }));
+  check('card-label-order', webLabels.join(',') === [TEXT.address, TEXT.key, TEXT.hostKey, TEXT.state, TEXT.visibility, TEXT.idleOverride, TEXT.remark, TEXT.lastCommand].join(','), webLabels.join(','));
+  const bare = renderHostCard({ alias: 'bare', host: '192.0.2.20', port: 22, user: 'root', source: 'ssh-config', state: 'idle', sessions: [] }, { state: dsh, mode: 'dsh' });
+  check('card-fixed-part', labelsOf(bare).join(',') === [TEXT.address, TEXT.key, TEXT.hostKey, TEXT.state, TEXT.visibility, TEXT.idleOverride, TEXT.remark].join(','), labelsOf(bare).join(','));
+  check('card-host-key-placeholder', /<div class="row-k">主机密钥<\/div><div class="row-v"><span class="muted">—<\/span>/.test(bare), 'an unknown host key keeps its row');
+  check('card-procs-last', renderHostCard(web, { state: mcp, mode: 'mcp' }).trim().endsWith('</div>\n</article>') && /host-section host-procs[\s\S]*<\/article>$/.test(renderHostCard(web, { state: mcp, mode: 'mcp' }).trim()), 'per-process rows close the card');
   check('card-order', html.indexOf('data-alias="web"') < html.indexOf('data-alias="db"'), 'hosts keep their order');
+}
+
+// ── keyboard reordering ─────────────────────────────────────────────────────
+{
+  check('move-down', moveAlias(['a', 'b', 'c'], 'a', 1).join() === 'b,a,c', moveAlias(['a', 'b', 'c'], 'a', 1).join());
+  check('move-up', moveAlias(['a', 'b', 'c'], 'c', -1).join() === 'a,c,b', moveAlias(['a', 'b', 'c'], 'c', -1).join());
+  check('move-clamped', moveAlias(['a', 'b', 'c'], 'a', -5).join() === 'a,b,c' && moveAlias(['a', 'b', 'c'], 'a', 9).join() === 'b,c,a', 'moves stop at the ends');
+  check('move-unknown', moveAlias(['a', 'b'], 'zz', 1).join() === 'a,b', 'an unknown alias changes nothing');
+  check('move-pure', (() => { const input = ['a', 'b']; moveAlias(input, 'a', 1); return input.join() === 'a,b'; })(), 'the input array is not mutated');
 }
 
 // ── primary action depends on the surface and the live processes ───────────
@@ -242,7 +261,9 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
   const { SshHelperPanel, STYLES } = await import('../ui/panel-element.js');
   check('element-defined-by-name', readFileSync(new URL('../ui/panel-element.js', import.meta.url), 'utf8').includes("customElements.define('ssh-helper-panel'"), 'the element must define itself');
   check('observed-attributes', SshHelperPanel.observedAttributes.join(',') === 'api-base,mode', JSON.stringify(SshHelperPanel.observedAttributes));
-  check('hosts-fixed-width', STYLES.includes('flex:0 0 380px') && STYLES.includes('flex-wrap:wrap'), 'cards keep a fixed, wider width and wrap when space runs out');
+  check('hosts-grid', STYLES.includes('.hosts{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr))') && STYLES.includes('align-items:stretch') && STYLES.includes('.host-procs{margin-top:auto}'), 'cards share a grid: equal widths, equal heights per row, process rows at the bottom');
+  check('rows-label-column', STYLES.includes('.rows{display:grid;grid-template-columns:64px minmax(0,1fr)'), 'one label column for every card');
+  check('grip-touch', STYLES.includes('touch-action:none') && STYLES.includes('cursor:grab'), 'the handle drags on touch screens too');
   check('theme-pierces-shadow', STYLES.includes(':host') && STYLES.includes('--dsw-alias-bg-base') && STYLES.includes('prefers-color-scheme:dark') && STYLES.includes('container-type:inline-size'), 'theme hooks');
 
   const makePanel = (attrs = {}) => {
@@ -313,7 +334,7 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
       { status: 200, json: { ok: true, state: { hosts: [] }, token: 'new' } },
       { status: 200, json: { ok: true, state: { hosts: [{ alias: 'b' }] } } }
     ];
-    const written = await writer.call('meta', { alias: 'a', prod: true });
+    const written = await writer.call('meta', { alias: 'a', hidden: true });
     check('call-retry', written?.ok === true && calls.map((entry) => entry.method).join(',') === 'POST,GET,POST', JSON.stringify(calls.map((entry) => `${entry.method} ${entry.url}`)));
     check('call-retry-credential', calls[2].token === 'new' && writer.state?.hosts?.[0]?.alias === 'b' && writer.notice === null, JSON.stringify({ token: calls[2].token, state: writer.state }));
 
@@ -340,6 +361,16 @@ const twoLive = { ...mcp, instances: [instances[0], { pid: 333, connected: 0, ho
     queue = [{ status: 500, json: null }];
     await cold.call('state', undefined, { silent: true }).catch(() => {});
     check('poll-cold-failure-banner', cold.error === 'HTTP 500', String(cold.error));
+
+    // Saving a card order reorders the local state at once, then posts it.
+    calls.length = 0;
+    const sorter = makePanel({ 'api-base': '/api' });
+    sorter.state = { hosts: [{ alias: 'a' }, { alias: 'b' }, { alias: 'c' }] };
+    queue = [{ status: 200, json: { ok: true, state: { hosts: [{ alias: 'c' }, { alias: 'a' }, { alias: 'b' }] } } }];
+    const saving = sorter.saveOrder(['c', 'a', 'b']);
+    check('order-optimistic', sorter.state.hosts.map((host) => host.alias).join() === 'c,a,b', JSON.stringify(sorter.state.hosts));
+    await saving;
+    check('order-posted', calls[0]?.url === '/api/order' && calls[0]?.method === 'POST' && calls[0]?.body === JSON.stringify({ order: ['c', 'a', 'b'] }), JSON.stringify(calls[0]));
   } finally {
     globalThis.fetch = originalFetch;
   }

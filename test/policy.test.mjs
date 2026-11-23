@@ -13,16 +13,17 @@ const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: 
 const policy = createPolicy();
 const verdict = (command) => policy.evaluate({ command });
 
-// ── the rule set is exactly the six machine-destroying shapes ───────────────
+// ── the rule set is exactly the machine-destroying shapes ───────────────────
 const ids = RULES.map((rule) => rule.id).sort();
 check(
   'rule-ids',
   JSON.stringify(ids) === JSON.stringify([
-    'danger.cd-bulk-delete',
     'danger.dd-device',
+    'danger.empty-var-delete',
     'danger.fs-format',
     'danger.overwrite-device',
     'danger.recursive-chmod-root',
+    'danger.remove-essential',
     'danger.rm-root'
   ]),
   JSON.stringify(ids)

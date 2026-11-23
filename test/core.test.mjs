@@ -87,12 +87,10 @@ const CONFIG = { maxOutputBytes: 32768, defaultTimeoutMs: 30000 };
   const ok = await run.execute({ host: 'h', command: 'uptime' });
   check('allow-ordinary', ok.exitCode === 0 && seen.execs.length === 1, JSON.stringify(ok));
 
-  const write = createTools(pool, CONFIG).find((tool) => tool.name === 'ssh_write');
-  const writeError = await failureOf(write.execute({ host: 'h', path: '/dev/sda', content: 'x' }));
-  check('write-deny-structured', writeError instanceof PolicyDeniedError && writeError.target === 'path' && writeError.path === '/dev/sda' && writeError.rule === 'danger.write-device', JSON.stringify({ target: writeError?.target, path: writeError?.path, rule: writeError?.rule }));
-  check('write-deny-before-sftp', seen.writes === 0, `${seen.writes} sftp opens`);
-
   const transfer = createTools(pool, CONFIG).find((tool) => tool.name === 'ssh_transfer');
+  const deviceError = await failureOf(transfer.execute({ host: 'h', direction: 'upload', localPath: '/tmp/x', remotePath: '/dev/sda' }));
+  check('upload-device-structured', deviceError instanceof PolicyDeniedError && deviceError.target === 'path' && deviceError.path === '/dev/sda' && deviceError.rule === 'danger.write-device', JSON.stringify({ target: deviceError?.target, path: deviceError?.path, rule: deviceError?.rule }));
+  check('upload-deny-before-sftp', seen.writes === 0, `${seen.writes} sftp opens`);
   const uploadError = await failureOf(transfer.execute({ host: 'h', direction: 'upload', localPath: '/tmp/x', remotePath: '/boot/vmlinuz' }));
   check('upload-deny-structured', uploadError?.code === 'POLICY_DENY' && uploadError.rule === 'danger.write-system', String(uploadError));
 }
@@ -225,8 +223,8 @@ const CONFIG = { maxOutputBytes: 32768, defaultTimeoutMs: 30000 };
     }
   });
   check('custom-status', analyzer.status().available === true && analyzer.status().model === 'sampling/client', JSON.stringify(analyzer.status()));
-  const result = await analyzer.run({ tool: 'ssh_read', target: '/var/log/app.log', text: 'ERROR password=hunter2', bytes: 22, sessionId: 'mcp-1' });
-  check('custom-summary', result.summary === '未发现明显错误' && result.model === 'sampling/client' && result.source === 'ssh_read', JSON.stringify(result));
+  const result = await analyzer.run({ tool: 'ssh_run', target: 'tail -n 50 /var/log/app.log', text: 'ERROR password=hunter2', bytes: 22, sessionId: 'mcp-1' });
+  check('custom-summary', result.summary === '未发现明显错误' && result.model === 'sampling/client' && result.source === 'ssh_run', JSON.stringify(result));
   check('custom-request-shape', typeof request?.system === 'string' && typeof request?.prompt === 'string' && request?.tools === undefined && request?.sessionId === 'mcp-1' && request?.signal instanceof AbortSignal, JSON.stringify(Object.keys(request ?? {})));
   check('custom-prompt-redacted', !/hunter2/.test(request?.prompt ?? ''), request?.prompt);
 

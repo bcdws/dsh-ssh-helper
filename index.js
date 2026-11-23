@@ -20,7 +20,7 @@ import { MetadataStore } from './lib/store.js';
 import { createPolicy, formatDenial } from './lib/policy.js';
 import { createAssistantApi } from './lib/assistant-api.js';
 import { SshPool } from './lib/pool.js';
-import { createTools } from './lib/tools.js';
+import { createTools, runShellContext } from './lib/tools.js';
 import { fromDshExecution } from './lib/call-context.js';
 import { commandKind, createDiagnostics } from './lib/diagnostics.js';
 import { createAnalyzer } from './dsh/llm-backend.js';
@@ -175,7 +175,10 @@ export function apply(ctx, config = {}) {
         });
         return planDeleteMessage(args.host);
       }
-      const verdict = policy.evaluate({ alias: args.host, command: args.command, host: args.host });
+      // Same shell context as the tool's own check (session cwd and exports,
+      // the cwd argument, the login's home), so the two never disagree.
+      const shell = typeof args.host === 'string' && pool.has(args.host) ? runShellContext(pool.connection(args.host), args, fromDshExecution(execution).callerId) : {};
+      const verdict = policy.evaluate({ alias: args.host, command: args.command, host: args.host, ...shell });
       if (verdict.action === 'deny') {
         diagnostics.record({
           tool: 'ssh_run',

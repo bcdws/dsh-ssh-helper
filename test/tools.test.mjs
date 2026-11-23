@@ -18,7 +18,7 @@ const pool = {
   logger: undefined,
   has: (alias) => specs.has(alias),
   hostVisible: (alias) => !hidden.has(alias),
-  hostMeta: (alias) => ({ remark: alias === 'open-host' ? '生产主库，先确认' : '', hidden: hidden.has(alias), prod: false, idleTimeoutMs: null }),
+  hostMeta: (alias) => ({ remark: alias === 'open-host' ? '生产主库，先确认' : '', hidden: hidden.has(alias), idleTimeoutMs: null }),
   // Live deadline policy (the assistant settings), distinct from the config.
   timeoutPolicy: () => ({ multiplier: 2.5, floorMs: 1000, ceilingMs: 3600000, fallbackEstimateMs: 4000 }),
   // The panel's activity trail: every model-facing operation lands here.
@@ -76,15 +76,13 @@ check(
 );
 const planned = await byName.get('ssh_run').execute({ host: 'open-host', command: 'deploy.sh --all', expectedMs: 60000 }, {});
 check('expected-ms-drives-deadline', seen.execTimeouts.at(-1) === 150000 && planned.deadlineSource === 'expectedMs', `timeoutMs=${seen.execTimeouts.at(-1)} source=${planned.deadlineSource}`);
-await byName.get('ssh_run').execute({ host: 'open-host', command: 'echo hi', timeoutMs: 9000 }, {});
-check('explicit-deadline-wins', seen.execTimeouts.at(-1) === 9000, `timeoutMs=${seen.execTimeouts.at(-1)}`);
 
 // The hidden host is indistinguishable from one that does not exist.
 await expectDenied('hidden-hosts-detail', byName.get('ssh_hosts').execute({ host: 'hidden-host' }));
 await expectDenied('hidden-run', byName.get('ssh_run').execute({ host: 'hidden-host', command: 'echo hi' }, {}));
 await expectDenied('hidden-transfer', byName.get('ssh_transfer').execute({ direction: 'download', host: 'hidden-host', localPath: 'C:\\tmp\\x', remotePath: '/tmp/x' }, {}));
 
-check('activity-recorded', seen.activities.length >= 3 && seen.activities.every((entry) => entry.alias === 'open-host' && typeof entry.detail === 'string'), JSON.stringify(seen.activities.slice(0, 2)));
+check('activity-recorded', seen.activities.length >= 2 && seen.activities.every((entry) => entry.alias === 'open-host' && typeof entry.detail === 'string'), JSON.stringify(seen.activities.slice(0, 2)));
 check('activity-carries-outcome', seen.activities.some((entry) => entry.exitCode === 0 && entry.kind === 'run'), JSON.stringify(seen.activities.slice(0, 1)));
 
 // A genuinely unknown host keeps its own wording (nothing new leaks).
@@ -108,6 +106,38 @@ try {
 const failure = recorded.at(-1);
 check('diagnostics-error-classified', failure?.tool === 'ssh_run' && failure?.outcome === 'error' && failure?.reason === 'invalid' && failure?.commandKind === 'echo', JSON.stringify(failure));
 check('diagnostics-no-command-field', recorded.every((event) => !('command' in event) && !('stdout' in event)), JSON.stringify(recorded));
+
+// ── the guard sees the shell the command will run in ────────────────────────
+{
+  const sessions = new Map([['caller-a::main', { cwd: '/etc', variables: { APP: '/srv/app' }, alive: true }]]);
+  let runs = 0;
+  const ran = { ...pool, connection: (alias) => ({
+    ...pool.connection(alias),
+    spec: { user: 'root' },
+    peekSession: (name, owner) => sessions.get(`${owner}::${name}`),
+    session: () => ({ run: async () => { runs += 1; return { stdout: '', stderr: '', exitCode: 0, cwd: '/etc' }; } }),
+    exec: async () => { runs += 1; return { stdout: '', stderr: '', exitCode: 0, signal: null, timedOut: false }; },
+    background: async () => { runs += 1; return { raw: { stdout: '', stderr: '' }, pid: 7, logPath: '/root/.local/state/dsh-ssh/logs/x.log', scriptPath: null }; }
+  }) };
+  const run = createTools(ran, { maxOutputBytes: 200000, defaultTimeoutMs: 60000 }, {}).find((tool) => tool.name === 'ssh_run');
+  const outcome = async (args, callerId = 'caller-a') => {
+    try {
+      await run.execute({ host: 'open-host', ...args }, { callerId });
+      return 'allow';
+    } catch (error) {
+      return error?.code === 'POLICY_DENY' ? error.rule : `error ${error?.message}`;
+    }
+  };
+  check('guard-session-cwd', (await outcome({ command: 'rm -rf *', session: true })) === 'danger.rm-root', 'session cwd /etc makes * a system sweep');
+  check('guard-session-exports', (await outcome({ command: 'rm -rf $APP/*', session: true })) === 'allow', 'session exports resolve $APP');
+  check('guard-other-caller', (await outcome({ command: 'rm -rf *', session: true }, 'caller-b')) === 'allow', 'another caller has no session: directory unknown');
+  check('guard-fresh-shell', (await outcome({ command: 'rm -rf *' })) === 'allow', 'a fresh shell directory is not guessed');
+  check('guard-cd-in-command', (await outcome({ command: 'cd /usr/lib && rm -rf *' })) === 'danger.rm-root' && (await outcome({ command: 'cd /srv/app && rm -rf *' })) === 'allow', 'a cd in the command sets the directory');
+  check('guard-cd-relative-in-session', (await outcome({ command: 'cd ssh && rm -rf *', session: true })) === 'danger.rm-root', 'a relative cd resolves against the session directory');
+  check('guard-background-ignores-session', (await outcome({ command: 'rm -rf *', session: true, background: true })) === 'allow', 'background mode runs outside the session');
+  check('guard-unset-var', (await outcome({ command: 'rm -rf "$DEPLOY_DIR"/*' })) === 'danger.empty-var-delete', 'an unset variable counts as empty');
+  check('guard-refusal-runs-nothing', runs === 5, `runs=${runs}`);
+}
 
 console.log(`${pass}/${pass + failures.length} passed`);
 for (const failure of failures) console.log(`FAIL ${failure}`);

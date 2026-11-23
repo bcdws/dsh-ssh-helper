@@ -31,7 +31,7 @@ const meta = (stored) => pool(stored).hostMeta('h');
 
 // ── the frozen host-meta shape ──────────────────────────────────────────────
 const fresh = meta(undefined);
-check('shape-keys', Object.keys(fresh).sort().join(',') === 'hidden,idleTimeoutMs,prod,remark', Object.keys(fresh).join(','));
+check('shape-keys', Object.keys(fresh).sort().join(',') === 'hidden,idleTimeoutMs,remark', Object.keys(fresh).join(','));
 check('fresh-visible', fresh.hidden === false && fresh.remark === '' && fresh.idleTimeoutMs === null, JSON.stringify(fresh));
 check('shape-has-no-legacy-fields', ['profile', 'caps', 'level', 'visible'].every((key) => !(key in fresh)), JSON.stringify(fresh));
 
@@ -70,6 +70,21 @@ check('wired-meta', wiredMeta.remark === 'wired' && wiredMeta.hidden === true &&
 check('wired-visible', wired.hostVisible('h') === false, 'hidden host must be invisible');
 store.setHost('h', { hidden: false });
 check('wired-unhidden', wired.hostVisible('h') === true && wired.hostMeta('h').remark === 'wired', JSON.stringify(wired.hostMeta('h')));
+
+// ── status() follows the panel's card order ─────────────────────────────────
+{
+  const hosts = new Map(['a', 'b', 'c', 'd'].map((alias) => [alias, { ...spec, alias }]));
+  let order = ['c', 'gone', 'a'];
+  const ordered = new SshPool({ hosts, config, logger: { warn: () => {}, info: () => {} }, meta: { host: () => undefined, settings: () => config, hostOrder: () => order } });
+  pools.push(ordered);
+  check('status-card-order', ordered.status().map((entry) => entry.alias).join() === 'c,a,b,d', ordered.status().map((entry) => entry.alias).join());
+  check('aliases-config-order', ordered.aliases.join() === 'a,b,c,d', ordered.aliases.join());
+  order = [];
+  check('status-no-order', ordered.status().map((entry) => entry.alias).join() === 'a,b,c,d', 'no order keeps config order');
+  const plain = new SshPool({ hosts, config, logger: { warn: () => {}, info: () => {} }, meta: { host: () => undefined, settings: () => config } });
+  pools.push(plain);
+  check('status-meta-without-order', plain.status().map((entry) => entry.alias).join() === 'a,b,c,d', 'a meta without hostOrder keeps config order');
+}
 
 for (const created of pools) created.dispose();
 rmSync(dir, { recursive: true, force: true });

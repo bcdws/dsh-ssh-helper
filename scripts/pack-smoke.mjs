@@ -120,7 +120,7 @@ try {
 
   if (!answers.has(1) || !answers.has(2)) fail(`no initialize/tools answer within 15s${stderr ? `: ${stderr.slice(-300)}` : ''}`);
   const tools = answers.get(2).result?.tools ?? [];
-  if (tools.length !== 8) fail(`tools/list returned ${tools.length} tools, expected 8`);
+  if (tools.length !== 3) fail(`tools/list returned ${tools.length} tools, expected 3`);
   if (answers.get(1).result?.serverInfo?.name !== 'dsh-ssh-helper') fail('initialize answer carries no serverInfo');
 
   console.log(`✓ packed ${(packed.size / 1024).toFixed(0)} KB, installed 1 package, initialize answered in ${Date.now() - started} ms`);

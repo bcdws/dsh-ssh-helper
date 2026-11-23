@@ -17,7 +17,7 @@ import { MetadataStore, defaultStatePath } from '../lib/store.js';
 /**
  * @param input - `{ filePath?, defaults?, minIntervalMs? }`; `defaults` is the
  *   same `{ settings }` seed `MetadataStore` takes.
- * @returns `{ host(alias), settings(), refresh(), filePath }` — the shape
+ * @returns `{ host(alias), settings(), hostOrder(), refresh(), filePath }` — the shape
  *   `SshPool` reads, plus an immediate re-check for the hidden-host watcher.
  */
 export function createStateView({ filePath = defaultStatePath(), defaults = {}, minIntervalMs = 1000 } = {}) {
@@ -59,6 +59,7 @@ export function createStateView({ filePath = defaultStatePath(), defaults = {}, 
     filePath,
     refresh,
     host: (alias) => current().host(alias),
-    settings: () => current().settings()
+    settings: () => current().settings(),
+    hostOrder: () => current().hostOrder()
   };
 }

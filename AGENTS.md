@@ -45,7 +45,7 @@ scripts/pack-smoke.mjs   打包冒烟：npm pack → 装 tarball → initialize
 .github/workflows/ci.yml 测试、vendor 对比、打包冒烟、main→stable 快进、tag 发版
 ```
 
-- 护栏必须留在工具内部：`ssh_run` 里的 `assertCommandAllowed`，以及文件写入用的 `assertWritePathAllowed`。适配层可以再加拦截，但不能替代这两处。
+- 护栏必须留在工具内部：`ssh_run` 里的 `assertCommandAllowed`，以及 `ssh_transfer` 上传用的 `assertWritePathAllowed`。适配层可以再加拦截，但不能替代这两处。
 - 工具只读取中立的调用上下文 `{ callerId, signal, onOutput }`（`lib/call-context.js`），由各适配层自己转换。`onOutput(stream, text)` 可选，只用来报告进度（MCP 适配层把最新一行放进进度通知），不能影响命令本身或返回结果。
 - MCP 进程的 stdout 只能输出协议消息，日志一律写 stderr。
 - MCP server 进程从不写状态文件：默认只读跟随 `~/.dsh-ssh-mcp/state.json`，传了 `--state` 才改为跟随别的文件（比如 DSH 的）。这个文件唯一的写入方是 `dsh-ssh-mcp panel`，面板从不写 DSH 的 `state.json`。
@@ -53,9 +53,10 @@ scripts/pack-smoke.mjs   打包冒烟：npm pack → 装 tarball → initialize
 - 面板界面也只有一份：`ui/panel-view.js` 渲染 HTML 字符串，`ui/panel-element.js` 定义 `<ssh-helper-panel>`，DSH（`client.js`）和 MCP 页面（`panel.html`）都挂它，靠 `mode="dsh|mcp"` 区分两边的差异（sshVisible 总开关、进程页、按进程连接）。新增界面功能只改 `ui/`，两边同时生效；不要往 `client.js` 或 `panel.html` 里加布局和文案。`lib/assistant-api.js` 在 `<prefix>/ui/` 下按固定白名单提供这两个文件，不能从 URL 拼路径。
 - MCP 控制口（`mcp/control.js`）只提供状态读取和 open/close。它在 `initialize` 之后才启动，不能拖慢启动。测试里要用 `DSH_SSH_MCP_HOME` 指向临时目录，不要写到真实 home。
 - 运行时依赖保持为 0：ssh2 用 `npm run build:vendor` 打包进 `vendor/ssh2.cjs`（它是 devDependency），`lib/pool.js` 通过 `require('../vendor/ssh2.cjs')` 加载。升级 ssh2 后必须重新构建；`test/mcp.test.mjs` 有打包检查，CI 也会重新构建并对比 `vendor/`，不一致就失败。不要引入 MCP SDK 之类的大依赖。
-- 工具固定 8 个，名称和参数是两个适配层共同的契约，改动要同时考虑两边。
-- 误报按 bug 处理：改 `lib/policy.js` 时，同时在 `test/safety.test.mjs` 补上拦截和放行的用例。
-- prod 标记只做提醒，不拦截（这是用户的决定）。不要借 prod 加拦截规则，护栏仍然只有 `lib/policy.js` 这一份。
+- 工具固定 3 个（`ssh_hosts`、`ssh_run`、`ssh_transfer`），名称和参数是两个适配层共同的契约，改动要同时考虑两边。读、搜、改文件走 `ssh_run`，不要再加文件工具。
+- 误报按 bug 处理：改 `lib/policy.js` 时，同时在 `test/safety.test.mjs` 补上拦截和放行的用例。保护范围是一份短名单（根目录、系统目录树根、启动/登录必需的目录、账户文件、核心程序和 C 库），不要扩回"整棵 /etc、/usr"。
+- 护栏判断用的 shell 上下文（session 的 cwd 和 export、登录用户的 home）只由 `lib/tools.js` 的 `runShellContext` 给出，`ssh_run` 和 DSH 前置拦截共用，两边不能各算各的。
+- 没有生产标记（用户的决定：繁琐、增加复杂度，已去掉）。不要再加按主机分级的标记或规则；安全只靠 `lib/policy.js` 这一道护栏：拦截会让机器报废的命令。
 - 工具失败统一由 `lib/errors.js` 打上错误码。新增失败类型时，在 `FAILURE_CODES` 和 `RULES` 里一起加，并在 `test/failures.test.mjs` 补用例。错误提示里不能透露隐藏主机的存在。
 
 ## 测试
@@ -69,8 +70,7 @@ node test/run.mjs --offline
 ## 调用这些工具时
 
 - 先调 `ssh_hosts` 看有哪些主机。
-- 需要保留目录或环境变量时，给 `ssh_run` 传 `session`；慢操作给出 `expectedMs`；守护进程用 `background: true`，不要自己加 `&`。后台模式会在服务器上留下日志和存放命令正文的 `.dsh-ssh-run-<hash>.sh`，路径见结果里的 `logPath` / `scriptPath`（脚本总在插件日志目录，不一定和日志同目录）。
-- 读文件、搜内容优先用 `ssh_read` / `ssh_grep` / `ssh_glob`，小改动用 `ssh_edit`。
+- 需要保留目录或环境变量时，给 `ssh_run` 传 `session`；慢操作给出 `expectedMs`；守护进程用 `background: true`，不要自己加 `&`。后台模式会在服务器上留下日志和存放命令正文的 `.dsh-ssh-run-<hash>.sh`，路径见结果里的 `logPath` / `scriptPath`（都在插件日志目录）。
+- 读文件、搜内容、改配置用 `ssh_run` 里的普通命令，输出加上界（`sed -n`、`tail -n`、`grep -m`）。
 - 命令被护栏拒绝时，说明意图（哪台机器、做什么、预期影响），交给用户决定，不要换一种等价写法重试。
-- 标了 `[PROD]` 的主机正在跑实际业务：优先只读检查；要重启、删除或修改配置和数据，先说明影响并取得用户确认。
 - 失败时先看 `[error: <code>]` 那一行。客户端报了超时，命令可能已经执行了，先调 `ssh_hosts` 看 `lastFailure`，再决定要不要重试；不要改用本地 ssh。

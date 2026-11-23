@@ -47,11 +47,6 @@ const INTERNAL_ERROR = -32603;
 export const TOOL_ANNOTATIONS = {
   ssh_hosts: { title: 'List SSH hosts', readOnlyHint: true, openWorldHint: false },
   ssh_run: { title: 'Run remote command', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-  ssh_read: { title: 'Read remote file', readOnlyHint: true, openWorldHint: true },
-  ssh_glob: { title: 'Find remote files', readOnlyHint: true, openWorldHint: true },
-  ssh_grep: { title: 'Search remote files', readOnlyHint: true, openWorldHint: true },
-  ssh_write: { title: 'Write remote file', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-  ssh_edit: { title: 'Edit remote file', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   ssh_transfer: { title: 'Transfer file', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }
 };
 

@@ -1,15 +1,14 @@
 /**
- * Failure codes, per-host failed-call memory, the prod label, and the local
+ * Failure codes, per-host failed-call memory, host notes as notices, and the local
  * host info in ssh_hosts. Offline: fake connections, TEST-NET addresses only.
  */
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { annotateError, classifyError, FAILURE_CODES } from '../lib/errors.js';
 import { createTools } from '../lib/tools.js';
 import { MetadataStore } from '../lib/store.js';
 import { SshPool } from '../lib/pool.js';
-import { createAssistantApi } from '../lib/assistant-api.js';
 import { toMcpError, toMcpResult, ERROR_META_KEY } from '../mcp/server.js';
 import { PolicyDeniedError } from '../lib/policy.js';
 import { suggestAliases, unknownHostMessage } from '../lib/alias-suggest.js';
@@ -93,8 +92,8 @@ const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: 
   check('suggest-message-empty', unknownHostMessage('zzz', []).endsWith('known hosts: (none available)'), unknownHostMessage('zzz', []));
 }
 
-// ── tool layer: failures recorded, prod marker, local info ─────────────────
-function fakePool({ prod = new Set(), behaviour = {} } = {}) {
+// ── tool layer: failures recorded, note notices, local info ────────────────
+function fakePool({ remarks = {}, behaviour = {} } = {}) {
   const specs = new Map([
     ['web', { alias: 'web', host: '192.0.2.10', port: 22, user: 'root', keyName: 'id_web', state: 'idle', connected: false }],
     ['db', { alias: 'db', host: '192.0.2.11', port: 22, user: 'root', keyName: 'id_db', state: 'idle', connected: false }],
@@ -107,7 +106,7 @@ function fakePool({ prod = new Set(), behaviour = {} } = {}) {
     warnings: [],
     has: (alias) => specs.has(alias),
     hostVisible: (alias) => alias !== 'secret',
-    isProd: (alias) => prod.has(alias),
+    hostMeta: (alias) => ({ remark: remarks[alias] ?? '', hidden: alias === 'secret', idleTimeoutMs: null }),
     noteCallFailure: (alias, failure) => noted.push({ alias, ...failure }),
     timeoutPolicy: () => ({ multiplier: 3, floorMs: 1000, ceilingMs: 3600000, fallbackEstimateMs: 4000 }),
     recordActivity: (entry) => behaviour.activity?.push(entry),
@@ -136,8 +135,7 @@ function fakePool({ prod = new Set(), behaviour = {} } = {}) {
         failures: 0,
         idleSeconds: null,
         hidden: spec.alias === 'secret',
-        prod: prod.has(spec.alias),
-        remark: '',
+        remark: remarks[spec.alias] ?? '',
         idleTimeoutMs: null,
         effectiveIdleTimeoutMs: 0,
         callFailures: 0,
@@ -233,41 +231,38 @@ const firstText = (tool, args, value) => tool.output.render(args, value)[0].text
   check('timeout-result-recorded', value.timedOut === true && pool.noted[0]?.code === 'exec_timeout', JSON.stringify(pool.noted));
 }
 {
-  const pool = fakePool({ prod: new Set(['db']) });
+  const pool = fakePool({ remarks: { db: '主库，改动先确认' } });
   const tools = toolsFor(pool);
   const run = tools.get('ssh_run');
   const value = await run.execute({ host: 'db', command: 'uptime' }, {});
-  check('prod-run-marked', firstText(run, { host: 'db' }, value).startsWith('[PROD] db is a production server.'), firstText(run, { host: 'db' }, value).slice(0, 120));
+  check('note-run-marked', firstText(run, { host: 'db' }, value).startsWith('[note] db: 主库，改动先确认\n'), firstText(run, { host: 'db' }, value).slice(0, 120));
   const plain = await run.execute({ host: 'web', command: 'uptime' }, {});
-  check('non-prod-unmarked', !firstText(run, { host: 'web' }, plain).includes('[PROD]'), firstText(run, { host: 'web' }, plain).slice(0, 80));
-  // MCP clients that read structuredContent never see the text: the reminder
+  check('unnoted-unmarked', !firstText(run, { host: 'web' }, plain).includes('[note]'), firstText(run, { host: 'web' }, plain).slice(0, 80));
+  // MCP clients that read structuredContent never see the text: the note
   // must also be in the value, and the schema must allow it.
-  check('prod-run-notices', Array.isArray(value.notices) && value.notices.length === 1 && value.notices[0].startsWith('[PROD] db is a production server.'), JSON.stringify(value.notices));
-  check('prod-notices-first-key', Object.keys(value)[0] === 'notices', JSON.stringify(Object.keys(value)));
-  check('prod-text-not-doubled', firstText(run, { host: 'db' }, value).split('[PROD] db').length === 2, firstText(run, { host: 'db' }, value).slice(0, 200));
-  check('non-prod-no-notices', plain.notices === undefined, JSON.stringify(plain.notices));
+  check('note-run-notices', JSON.stringify(value.notices) === JSON.stringify(['[note] db: 主库，改动先确认']), JSON.stringify(value.notices));
+  check('notices-first-key', Object.keys(value)[0] === 'notices', JSON.stringify(Object.keys(value)));
+  check('note-text-not-doubled', firstText(run, { host: 'db' }, value).split('[note] db').length === 2, firstText(run, { host: 'db' }, value).slice(0, 200));
+  check('unnoted-no-notices', plain.notices === undefined, JSON.stringify(plain.notices));
   const runProps = run.output.schema.properties;
   check('run-schema-notices', runProps.notices?.type === 'array' && runProps.notices.items?.type === 'string', JSON.stringify(runProps.notices));
   check('run-value-fits-schema', Object.keys(value).every((key) => key in runProps), JSON.stringify(Object.keys(value).filter((key) => !(key in runProps))));
   const structured = toMcpResult(run, { host: 'db' }, value);
-  check('mcp-structured-notices', structured.structuredContent?.notices?.[0]?.startsWith('[PROD] db') === true, JSON.stringify(structured.structuredContent?.notices));
-  check('mcp-text-notices', structured.content[0].text.startsWith('[PROD] db is a production server.'), structured.content[0].text.slice(0, 80));
-  check('hosts-schema-no-notices', tools.get('ssh_hosts').output.schema.properties.notices === undefined, 'ssh_hosts already carries prod/remark per host');
-  const read = tools.get('ssh_read');
-  check('read-tools-unmarked', read.output.render({ host: 'db' }, { path: '/etc/hostname', content: 'x', totalLines: 1, offset: 1, limit: 1, truncated: false, sha256: 'a', host: 'db', analysis: null, analysisError: null })?.[0]?.text?.includes('[PROD]') !== true, 'ssh_read marked');
+  check('mcp-structured-notices', structured.structuredContent?.notices?.[0]?.startsWith('[note] db') === true, JSON.stringify(structured.structuredContent?.notices));
+  check('mcp-text-notices', structured.content[0].text.startsWith('[note] db: 主库'), structured.content[0].text.slice(0, 80));
+  check('hosts-schema-no-notices', tools.get('ssh_hosts').output.schema.properties.notices === undefined, 'ssh_hosts already carries the remark per host');
 
   const hosts = tools.get('ssh_hosts');
   const listed = await hosts.execute({});
   const text = firstText(hosts, {}, listed);
-  check('hosts-prod-field', listed.hosts.find((host) => host.alias === 'db')?.prod === true, JSON.stringify(listed.hosts));
-  check('hosts-prod-render', /db → root@192\.0\.2\.11:22 \[PROD\]/.test(text) && text.includes('[prod] Hosts marked [PROD]'), text);
+  check('hosts-note-render', /db → root@192\.0\.2\.11:22 .*note=主库，改动先确认/.test(text) && !/\[PROD\]|\[prod\]/.test(text), text);
   check('hosts-hidden-still-hidden', !listed.hosts.some((host) => host.alias === 'secret') && !text.includes('secret'), text);
   check('hosts-local', listed.local?.hostname === hostname() && listed.local.platform === process.platform && typeof listed.local.cwd === 'string' && listed.local.uptimeSeconds >= 0, JSON.stringify(listed.local));
   check('hosts-local-render', text.includes(`[local] this server runs on ${hostname()}`) && text.includes('localPath is resolved there'), text);
   check('run-description-first-call', /first call opens the SSH connection/.test(run.description) && /\[error: <code>\]/.test(run.description) && /Do not fall back to local ssh/.test(run.description), run.description);
 }
 
-// ── real pool: lastFailure, lastCommandAgeSeconds, prod via the store ──────
+// ── real pool: lastFailure, lastCommandAgeSeconds ──────────────────────────
 {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-failures-'));
   const statePath = join(dir, 'state.json');
@@ -276,7 +271,7 @@ const firstText = (tool, args, value) => tool.output.render(args, value)[0].text
   const pool = new SshPool({ hosts, config: { maxChannelsPerHost: 4, idleTimeoutMs: 0, autoConnect: [] }, meta: store });
 
   const idle = pool.status()[0];
-  check('idle-shape', idle.lastCommandAgeSeconds === null && idle.callFailures === 0 && idle.lastFailure === null && idle.prod === false, JSON.stringify(idle));
+  check('idle-shape', idle.lastCommandAgeSeconds === null && idle.callFailures === 0 && idle.lastFailure === null && !('prod' in idle), JSON.stringify(idle));
   pool.noteCallFailure('web', { tool: 'ssh_run', code: 'connect_timeout', message: 'handshake timed out password=hunter2' });
   pool.noteCallFailure('nope', { tool: 'ssh_run', code: 'error', message: 'ignored' });
   const after = pool.status()[0];
@@ -284,36 +279,7 @@ const firstText = (tool, args, value) => tool.output.render(args, value)[0].text
   check('last-failure-redacted', !after.lastFailure.message.includes('hunter2'), after.lastFailure.message);
   check('connect-counters-untouched', after.failures === 0 && after.connects === 0, JSON.stringify(after));
 
-  store.setHost('web', { prod: true });
-  check('prod-from-store', pool.isProd('web') && pool.status()[0].prod === true, JSON.stringify(pool.status()[0]));
-  check('prod-persisted', JSON.parse(readFileSync(statePath, 'utf8')).hosts.web.prod === true, readFileSync(statePath, 'utf8'));
-  store.setHost('web', { prod: false });
-  check('prod-off-not-written', !('prod' in JSON.parse(readFileSync(statePath, 'utf8')).hosts.web), readFileSync(statePath, 'utf8'));
-  store.setHost('web', { remark: 'x' });
-  check('prod-survives-other-edits', store.host('web').prod === false && store.host('web').remark === 'x', JSON.stringify(store.host('web')));
   pool.dispose();
-
-  // The panel API passes `prod` through to the store.
-  const api = createAssistantApi({ pool: { has: () => true, status: () => [], connection: () => ({ state: 'idle', close: () => {} }) }, store, config: {} });
-  const patches = [];
-  const original = store.setHost.bind(store);
-  store.setHost = (alias, patch) => {
-    patches.push(patch);
-    return original(alias, patch);
-  };
-  const token = api.token;
-  const req = {
-    method: 'POST',
-    url: '/ssh-pool/meta',
-    headers: { 'x-dsh-ssh-pool-token': token },
-    socket: { remoteAddress: '127.0.0.1' },
-    async *[Symbol.asyncIterator]() {
-      yield Buffer.from(JSON.stringify({ alias: 'web', prod: true }));
-    }
-  };
-  let status = 0;
-  await api.handler(req, { writeHead: (code) => (status = code), end: () => {} });
-  check('api-meta-prod', status === 200 && patches[0]?.prod === true && store.host('web').prod === true, `${status} ${JSON.stringify(patches)}`);
   rmSync(dir, { recursive: true, force: true });
 }
 

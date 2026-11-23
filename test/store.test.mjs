@@ -20,13 +20,13 @@ const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: 
 const document = (path) => JSON.parse(readFileSync(path, 'utf8'));
 const hostsOf = (path) => document(path).hosts;
 /** The frozen shape, field names fixed by the contract. */
-const SHAPE = 'alias,hidden,idleTimeoutMs,prod,remark';
+const SHAPE = 'alias,hidden,idleTimeoutMs,remark';
 /** The only keys ever written for a host. */
 const STORED_KEYS = 'hidden,idleTimeoutMs,remark';
 /** The four settings the panel exposes, field names fixed by the contract. */
 const SETTINGS_SHAPE = 'idleTimeoutMs,logAnalysis,maskAddresses,maxOutputBytes,sshVisible,transferTimeoutMs';
-/** Removed in the single-guard slimming: never read back, accepted or persisted. */
-const LEGACY_HOST_KEYS = ['profile', 'caps', 'level', 'visible'];
+/** Removed in the single-guard slimming (and the prod label after it): never read back, accepted or persisted. */
+const LEGACY_HOST_KEYS = ['profile', 'caps', 'level', 'visible', 'prod'];
 const DELETED_SETTINGS = ['timeoutMultiplier', 'timeoutFloorMs', 'timeoutCeilingMs', 'maxLogLines', 'blockResourceSpikes', 'productionEnforced'];
 
 const store = new MetadataStore({
@@ -61,10 +61,10 @@ check('idle-reset', idleReset.idleTimeoutMs === null, JSON.stringify(idleReset))
 const idleClamped = store.setHost('web-1', { idleTimeoutMs: MAX_IDLE_TIMEOUT_MS + 1 });
 check('idle-clamped-to-current', idleClamped.idleTimeoutMs === null, JSON.stringify(idleClamped));
 
-// An old panel may still send profile/caps/level; they must not break the write
-// and must never reach disk.
-const legacyWrite = store.setHost('legacy-write', { profile: 'managed', caps: { read: true }, level: 'services', remark: 'kept' });
-check('legacy-write-ignores-profile', legacyWrite.remark === 'kept' && !('profile' in legacyWrite) && !('caps' in legacyWrite), JSON.stringify(legacyWrite));
+// An old panel may still send profile/caps/level/prod; they must not break the
+// write and must never reach disk.
+const legacyWrite = store.setHost('legacy-write', { profile: 'managed', caps: { read: true }, level: 'services', prod: true, remark: 'kept' });
+check('legacy-write-ignores-profile', legacyWrite.remark === 'kept' && !('profile' in legacyWrite) && !('caps' in legacyWrite) && !('prod' in legacyWrite), JSON.stringify(legacyWrite));
 check('legacy-write-stored-keys', Object.keys(hostsOf(file)['legacy-write']).sort().join(',') === STORED_KEYS, JSON.stringify(hostsOf(file)['legacy-write']));
 
 // ── an old state file upgrades on read, and the next write cleans it ────────
@@ -73,7 +73,7 @@ writeFileSync(
   legacyFile,
   JSON.stringify({
     hosts: {
-      old: { profile: 'production', caps: { read: true, files: true, packages: true, services: true }, level: 'services', visible: true, remark: 'old box', idleTimeoutMs: 60000 },
+      old: { profile: 'production', caps: { read: true, files: true, packages: true, services: true }, level: 'services', visible: true, prod: true, remark: 'old box', idleTimeoutMs: 60000 },
       oldHidden: { profile: 'managed', level: 'hidden', visible: false, remark: '' },
       oldVisibleFalse: { visible: false },
       oldCaps: { caps: { read: true, files: true, packages: false, services: false } }
@@ -85,6 +85,7 @@ writeFileSync(
 const migrated = new MetadataStore({ filePath: legacyFile });
 const old = migrated.host('old');
 check('legacy-old-visible', old.hidden === false && old.remark === 'old box' && old.idleTimeoutMs === 60000, JSON.stringify(old));
+check('legacy-prod-ignored', !('prod' in old), JSON.stringify(old));
 check('legacy-level-hidden', migrated.host('oldHidden').hidden === true, JSON.stringify(migrated.host('oldHidden')));
 check('legacy-visible-false', migrated.host('oldVisibleFalse').hidden === true, JSON.stringify(migrated.host('oldVisibleFalse')));
 check('legacy-caps-ignored', migrated.host('oldCaps').hidden === false && !('caps' in migrated.host('oldCaps')), JSON.stringify(migrated.host('oldCaps')));
@@ -125,6 +126,29 @@ check('corrupt-replaced', document(corruptFile).hosts.x.remark === 'r', JSON.str
 // ── no secret material is persisted ────────────────────────────────────────
 const text = readFileSync(file, 'utf8');
 check('no-secret-keys', !/identityFile|passphrase|password|privateKey/i.test(text), text.slice(0, 120));
+
+// ── the panel's card order ──────────────────────────────────────────────────
+{
+  const orderFile = join(dir, 'order.json');
+  const ordered = new MetadataStore({ filePath: orderFile });
+  check('order-default-empty', ordered.hostOrder().length === 0 && !existsSync(orderFile), JSON.stringify(ordered.hostOrder()));
+  ordered.setHost('web', { remark: 'x' });
+  check('order-absent-from-file', !('order' in document(orderFile)), JSON.stringify(document(orderFile)));
+  const stored = ordered.setHostOrder(['db', 'web', 'db', '', 42, 'x'.repeat(300), 'cache']);
+  check('order-cleaned', stored.join() === 'db,web,cache', stored.join());
+  check('order-persisted', JSON.stringify(document(orderFile).order) === '["db","web","cache"]' && new MetadataStore({ filePath: orderFile }).hostOrder().join() === 'db,web,cache', JSON.stringify(document(orderFile)));
+  ordered.setHost('db', { hidden: true });
+  check('order-survives-host-edit', ordered.hostOrder().join() === 'db,web,cache' && document(orderFile).order.length === 3, JSON.stringify(document(orderFile).order));
+  ordered.renameHost('web', 'www');
+  check('order-follows-rename', ordered.hostOrder().join() === 'db,www,cache' && document(orderFile).hosts.www?.remark === 'x', JSON.stringify(document(orderFile)));
+  ordered.renameHost('cache', 'redis');
+  check('order-rename-without-metadata', new MetadataStore({ filePath: orderFile }).hostOrder().join() === 'db,www,redis', JSON.stringify(document(orderFile).order));
+  check('order-raw', ordered.raw().order.join() === 'db,www,redis', JSON.stringify(ordered.raw()));
+  ordered.setHostOrder([]);
+  check('order-cleared', ordered.hostOrder().length === 0 && !('order' in document(orderFile)), JSON.stringify(document(orderFile)));
+  writeFileSync(orderFile, JSON.stringify({ hosts: {}, order: 'not-a-list' }), 'utf8');
+  check('order-bad-file', new MetadataStore({ filePath: orderFile }).hostOrder().length === 0, 'a malformed order is ignored');
+}
 
 rmSync(dir, { recursive: true, force: true });
 console.log(`${pass}/${pass + failures.length} passed`);

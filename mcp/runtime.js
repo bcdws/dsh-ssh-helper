@@ -35,8 +35,8 @@ function instructionsFor(policy) {
   return [
     'SSH tools over a persistent connection pool (one SSH connection per host, reused by every call).',
     '- Call ssh_hosts first; hosts come from ~/.ssh/config (key/agent auth only).',
-    '- Prefer ssh_read / ssh_grep / ssh_glob over cat/grep/find in ssh_run, and ssh_edit for small changes.',
-    '- ssh_run: `session` keeps cwd and env, `expectedMs` for slow work, `background: true` for daemons (never append "&").',
+    '- ssh_run is a shell: read, search and edit files with the usual commands; `session` keeps cwd and env, `expectedMs` for slow work, `background: true` for daemons (never append "&").',
+    '- ssh_transfer moves one file between this machine and a host.',
     '- If the guard refuses a command, do NOT retry an equivalent rewrite; state the host, the action and its impact, and let the user decide.',
     '',
     '[policy]',

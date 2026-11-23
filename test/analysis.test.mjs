@@ -53,7 +53,7 @@ const digestText = [
   '2026-11-12T09:00:22Z ERROR upstream connect() failed (111: Connection refused) while connecting to 10.0.3.17:9000',
   '2026-11-12T09:01:33Z WARN  account locked user=deploy after 5 failed attempts ip=203.0.113.44 token=abcdef123456'
 ].join('\n');
-const digest = await missing.run({ tool: 'ssh_read', target: '/var/log/app.log', text: digestText, bytes: Buffer.byteLength(digestText) });
+const digest = await missing.run({ tool: 'ssh_run', target: 'tail -n 200 /var/log/app.log', text: digestText, bytes: Buffer.byteLength(digestText) });
 check('local-digest-counts', /×3/.test(digest.summary ?? '') && /Connection refused/i.test(digest.summary ?? ''), JSON.stringify(digest));
 check('local-digest-timeline', /2026-11-12T09:00:20Z → 2026-11-12T09:00:22Z/.test(digest.summary ?? ''), digest.summary);
 check('local-digest-redacted', /<redacted:token>/.test(digest.summary ?? '') && !/abcdef123456/.test(digest.summary ?? ''), digest.summary);
@@ -100,7 +100,7 @@ for (let i = 0; i < 3000; i += 1) logLines.push(`2026-11-12T08:00:00Z INFO  GET 
 for (let i = 0; i < 40; i += 1) logLines.push(`2026-11-12T10:50:${String(i % 60).padStart(2, '0')}Z ERROR db query timeout table=orders`);
 logLines.push('2026-11-12T10:51:00Z FATAL healthcheck failed 5 times, stopping');
 const errorLog = logLines.join('\n');
-const priorityResult = await priorityAnalyzer.run({ tool: 'ssh_read', target: '/var/log/app.log', text: errorLog, bytes: Buffer.byteLength(errorLog) });
+const priorityResult = await priorityAnalyzer.run({ tool: 'ssh_run', target: 'tail -n 200 /var/log/app.log', text: errorLog, bytes: Buffer.byteLength(errorLog) });
 const priorityPrompt = priorityCaptured?.messages?.[0]?.content?.[0]?.text ?? '';
 check('error-first-selection', priorityResult.truncated === true && priorityResult.analyzedBytes <= 65_536 && /ERROR db query timeout/.test(priorityPrompt) && /FATAL healthcheck/.test(priorityPrompt), JSON.stringify({ analyzedBytes: priorityResult.analyzedBytes, inputBytes: priorityResult.inputBytes }));
 check('error-first-head-context', /INFO {2}GET \/api\/v1\/items/.test(priorityPrompt), 'head lines should fill the remaining budget');
@@ -191,9 +191,8 @@ check('run-veto-returns-raw', raw.analysis === null && raw.stdout.text.length > 
 const mentioned = await byName.get('ssh_run').execute({ host: 'h', command: 'uptime' }, {});
 check('small-output-not-analyzed', mentioned.analysis === null && mentioned.stdout.text.length > 0, JSON.stringify(mentioned.analysis));
 
-const grep = await byName.get('ssh_grep').execute({ host: 'h', pattern: 'ERROR', path: '/var/log', analyze: true }, {});
-check('grep-analyzed', grep.analysis?.summary === 'summary:ssh_grep' && grep.matches.length === 0, JSON.stringify({ analysis: grep.analysis, matches: grep.matches.length }));
-check('grep-called-grep', calls.some((command) => command.includes("grep -")) || calls.some((command) => command.includes('grep')), JSON.stringify(calls.slice(-2)));
+const forced = await byName.get('ssh_run').execute({ host: 'h', command: 'uptime', analyze: true }, {});
+check('run-forced-analysis', forced.analysis?.summary === 'summary:ssh_run', JSON.stringify(forced.analysis));
 
 // A failed side call must not dump the whole log back into the main context.
 const fallbackTools = createTools(pool, { maxOutputBytes: 32768, defaultTimeoutMs: 30000 }, { analyzer: async () => null });

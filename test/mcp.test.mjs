@@ -17,6 +17,7 @@ import { createMcpSession, ERROR_META_KEY, SUPPORTED_PROTOCOL_VERSIONS, toMcpRes
 import { createSamplingBackend } from '../mcp/sampling.js';
 import { createStandaloneRuntime, defaultCallCapFor, SHORT_CLIENT_CALL_CAP_MS } from '../mcp/runtime.js';
 import { createSideAnalyzer } from '../lib/analysis.js';
+import { createStateView } from '../mcp/state-view.js';
 import { createTools } from '../lib/tools.js';
 
 let pass = 0;
@@ -91,11 +92,11 @@ const initParams = (protocolVersion) => ({ protocolVersion, capabilities: {}, cl
   const list = await server.call('tools/list');
   const tools = list.result?.tools ?? [];
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
-  check('list-eight', tools.length === 8, tools.map((tool) => tool.name).join(','));
+  check('list-three', tools.map((tool) => tool.name).join(',') === 'ssh_hosts,ssh_run,ssh_transfer', tools.map((tool) => tool.name).join(','));
   check('list-input-schema', tools.every((tool) => tool.inputSchema?.type === 'object'), 'every inputSchema must be an object schema');
   check('list-output-schema', tools.every((tool) => tool.outputSchema?.type === 'object'), 'every tool has an outputSchema on 2025-06-18');
-  check('annotation-readonly', byName.get('ssh_read')?.annotations?.readOnlyHint === true && byName.get('ssh_hosts')?.annotations?.readOnlyHint === true, JSON.stringify(byName.get('ssh_read')?.annotations));
-  check('annotation-destructive', byName.get('ssh_run')?.annotations?.destructiveHint === true && byName.get('ssh_write')?.annotations?.destructiveHint === true, JSON.stringify(byName.get('ssh_run')?.annotations));
+  check('annotation-readonly', byName.get('ssh_hosts')?.annotations?.readOnlyHint === true, JSON.stringify(byName.get('ssh_hosts')?.annotations));
+  check('annotation-destructive', byName.get('ssh_run')?.annotations?.destructiveHint === true && byName.get('ssh_transfer')?.annotations?.destructiveHint === true, JSON.stringify(byName.get('ssh_run')?.annotations));
   check('required-host-command', JSON.stringify(byName.get('ssh_run')?.inputSchema?.required) === '["host","command"]', JSON.stringify(byName.get('ssh_run')?.inputSchema?.required));
 
   const hosts = await server.call('tools/call', { name: 'ssh_hosts', arguments: {} });
@@ -113,7 +114,7 @@ const initParams = (protocolVersion) => ({ protocolVersion, capabilities: {}, cl
   const hiddenRun = await server.call('tools/call', { name: 'ssh_run', arguments: { host: 'beta', command: 'uptime' } });
   check('hidden-host-unreachable', hiddenRun.result?.isError === true && /unknown ssh host "beta"/.test(hiddenRun.result?.content?.[0]?.text ?? ''), JSON.stringify(hiddenRun.result));
 
-  const writeDenied = await server.call('tools/call', { name: 'ssh_write', arguments: { host: 'alpha', path: '/dev/sda', content: 'x' } });
+  const writeDenied = await server.call('tools/call', { name: 'ssh_transfer', arguments: { host: 'alpha', direction: 'upload', localPath: '/tmp/x', remotePath: '/dev/sda' } });
   check('write-deny-meta', writeDenied.result?._meta?.[ERROR_META_KEY]?.target === 'path', JSON.stringify(writeDenied.result?._meta));
 
   const unknownTool = await server.call('tools/call', { name: 'nope', arguments: {} });
@@ -405,7 +406,7 @@ const stubPool = (status = []) => ({
 // structuredContent is lean (no null/false fields, no deadline arithmetic
 // unless the deadline was hit) and still matches the advertised outputSchema.
 {
-  const idleHost = { alias: 'h1', host: '192.0.2.10', port: 22, user: 'root', keyName: null, source: 'ssh-config', state: 'idle', connected: false, connectedSeconds: 0, idleSeconds: null, connects: 0, reconnects: 0, failures: 0, handshakeTimeouts: 0, retryPaused: false, commands: 0, lastCommand: null, lastCommandAgeSeconds: null, lastCommandSeconds: null, callFailures: 0, lastFailure: null, sessions: [], hostKey: null, lastError: null, hidden: false, prod: false, remark: '', idleTimeoutMs: null, effectiveIdleTimeoutMs: 0 };
+  const idleHost = { alias: 'h1', host: '192.0.2.10', port: 22, user: 'root', keyName: null, source: 'ssh-config', state: 'idle', connected: false, connectedSeconds: 0, idleSeconds: null, connects: 0, reconnects: 0, failures: 0, handshakeTimeouts: 0, retryPaused: false, commands: 0, lastCommand: null, lastCommandAgeSeconds: null, lastCommandSeconds: null, callFailures: 0, lastFailure: null, sessions: [], hostKey: null, lastError: null, hidden: false, remark: '', idleTimeoutMs: null, effectiveIdleTimeoutMs: 0 };
   const tools = new Map(createTools(stubPool([idleHost]), { defaultTimeoutMs: 60000 }, {}).map((tool) => [tool.name, tool]));
   const run = tools.get('ssh_run');
   const runSchema = toMcpTool(run).outputSchema;
@@ -502,7 +503,7 @@ const stubPool = (status = []) => ({
   await init();
   const analyzer = createSideAnalyzer({ backend: createSamplingBackend(session) });
   check('sampling-available', analyzer.status().available === true, JSON.stringify(analyzer.status()));
-  const running = analyzer.run({ tool: 'ssh_read', target: '/var/log/syslog', text: 'ERROR token=abcdef0123456789abcdef', bytes: 30, sessionId: 'mcp:unit' });
+  const running = analyzer.run({ tool: 'ssh_run', target: 'tail -n 50 /var/log/syslog', text: 'ERROR token=abcdef0123456789abcdef', bytes: 30, sessionId: 'mcp:unit' });
   await sleep(0);
   const requestMessage = sent.find((message) => message.method === 'sampling/createMessage');
   check('sampling-request', requestMessage !== undefined && requestMessage.params?.includeContext === 'none' && requestMessage.params?.tools === undefined && typeof requestMessage.params?.systemPrompt === 'string', JSON.stringify(requestMessage?.params ?? null).slice(0, 200));
@@ -510,7 +511,7 @@ const stubPool = (status = []) => ({
   const result = await running;
   check('sampling-summary', result.summary === '连接超时 3 次' && result.model === 'mcp/client-model', JSON.stringify(result));
 
-  const failing = analyzer.run({ tool: 'ssh_read', target: 'x', text: 'x', bytes: 1 });
+  const failing = analyzer.run({ tool: 'ssh_run', target: 'x', text: 'x', bytes: 1 });
   await sleep(0);
   const second = sent.filter((message) => message.method === 'sampling/createMessage').at(-1);
   await session.receive({ jsonrpc: '2.0', id: second.id, error: { code: -1, message: 'User rejected sampling request' } });
@@ -538,6 +539,17 @@ const stubPool = (status = []) => ({
   const vendored = createRequire(import.meta.url)(join(root, 'vendor', 'ssh2.cjs'));
   check('packaging-vendored-ssh2', typeof vendored.Client === 'function' && typeof vendored.utils?.parseKey === 'function', 'vendor/ssh2.cjs must export ssh2 (npm run build:vendor)');
   check('packaging-vendor-shipped', (manifest.files ?? []).some((entry) => entry.startsWith('vendor/')), 'package.json files must ship vendor/');
+}
+
+// The read-only state view follows the panel's card order like the rest of the file.
+{
+  const viewFile = join(dir, 'order-view.json');
+  writeFileSync(viewFile, JSON.stringify({ hosts: {}, order: ['b', 'a'] }), 'utf8');
+  const view = createStateView({ filePath: viewFile, minIntervalMs: 0 });
+  check('view-order', view.hostOrder().join() === 'b,a', view.hostOrder().join());
+  writeFileSync(viewFile, JSON.stringify({ hosts: {}, order: ['a', 'b'] }), 'utf8');
+  utimesSync(viewFile, new Date(), new Date(Date.now() + 5000));
+  check('view-order-follows', view.refresh() === true && view.hostOrder().join() === 'a,b', view.hostOrder().join());
 }
 
 rmSync(dir, { recursive: true, force: true });

@@ -1,10 +1,10 @@
 # Host-level SSH connection pool and assistant. The point of this bundle is the
 # pooled transport: one authenticated SSH connection per host, opened on first
 # use and reused by every later call, so no command ever pays a second
-# handshake. Every session and every agent gets the same 8 pooled SSH tools
-# (ssh_hosts / ssh_run / ssh_read / ssh_write / ssh_edit / ssh_glob /
-# ssh_grep / ssh_transfer), and the Web UI
-# exposes the SSH assistant panel. The tool list is frozen; no more are added.
+# handshake. Every session and every agent gets the same 3 pooled SSH tools
+# (ssh_hosts / ssh_run / ssh_transfer), and the Web UI exposes the SSH
+# assistant panel. Files are read and edited through ssh_run; no more tools
+# are added.
 # Hosts default to ~/.ssh/config minus forge entries; every value below is
 # optional. What the assistant edits itself — per-host hidden / remark / idle
 # timeout, plus the four global settings (idleTimeoutMs, maxOutputBytes,

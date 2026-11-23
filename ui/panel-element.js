@@ -18,6 +18,7 @@
  */
 import {
   TEXT,
+  moveAlias,
   renderBanners,
   renderEditDialog,
   renderFooter,
@@ -87,7 +88,6 @@ button,input{font:inherit;color:inherit}
 .dot.connecting,.dot.paused{background:var(--warn)}
 .dot.down{background:var(--err)}
 .badge{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:5px;font-size:10.5px;font-weight:600;letter-spacing:.03em;border:1px solid var(--b2);color:var(--fg2);flex:0 0 auto;white-space:nowrap}
-.badge.prod{color:var(--err);border-color:color-mix(in srgb,var(--err) 55%,transparent);background:color-mix(in srgb,var(--err) 9%,transparent)}
 .badge.warn{color:var(--warn);border-color:var(--warn)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--b1);border-radius:8px;background:var(--l1);cursor:pointer;white-space:nowrap;font-size:12.5px}
 .btn:hover{background:var(--l2);border-color:var(--b2)}
@@ -106,41 +106,39 @@ button,input{font:inherit;color:inherit}
 .switch[aria-checked="true"] .knob{transform:translateX(16px);background:#fff}
 .switch.neutral[aria-checked="true"]{background:var(--l2);border-color:var(--b2)}
 .switch.neutral[aria-checked="true"] .knob{background:var(--fg)}
-.switch.danger[aria-checked="true"]{background:var(--err);border-color:var(--err)}
 .toggle-label{font-size:12px;color:var(--fg2);opacity:.6}
 .toggle-label.on{opacity:1;color:var(--fg)}
-.toggle-label.prod.on{color:var(--err);font-weight:600}
-.hint{font-size:11.5px;color:var(--fg2)}
 .num{width:84px;height:30px;padding:0 8px;text-align:center;border:1px solid var(--b1);border-radius:8px;background:var(--bg)}
 .text{width:100%;height:32px;padding:0 10px;border:1px solid var(--b1);border-radius:8px;background:var(--bg)}
 .num:focus,.text:focus{outline:none;border-color:var(--brand)}
 .field{display:flex;flex-direction:column;gap:6px}
 .field>span{font-size:12px;color:var(--fg2);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
-.hosts{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
-.host{display:flex;flex-direction:column;flex:0 0 380px;width:380px;max-width:100%;gap:10px;padding:14px 16px;border:1px solid var(--b1);border-radius:12px;background:var(--l1);min-width:0}
-.host-head{display:flex;align-items:center;gap:10px}
+.hosts{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px;align-items:stretch}
+.host{display:flex;flex-direction:column;gap:12px;padding:12px 16px 14px;border:1px solid var(--b1);border-radius:12px;background:var(--l1);min-width:0;transition:border-color .14s ease,box-shadow .14s ease,opacity .14s ease}
+.host:hover{border-color:var(--b2)}
+.host-head{display:flex;align-items:center;gap:8px;min-height:30px}
+.grip{display:inline-flex;align-items:center;justify-content:center;width:22px;height:28px;margin:0 -2px 0 -8px;padding:0;border:0;border-radius:6px;background:none;color:var(--fg2);cursor:grab;touch-action:none;opacity:.5;flex:0 0 auto}
+.host:hover .grip,.grip:focus-visible{opacity:1}
+.grip:hover{background:var(--l2);color:var(--fg)}
+.grip:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
 .host-id{display:flex;align-items:center;gap:6px;flex:1;min-width:0}
-.host-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
-.facts{display:grid;grid-template-columns:1fr 1fr;gap:5px 18px}
-.kv{display:flex;gap:8px;font-size:12.5px;min-width:0}
-.facts .kv:last-child:nth-child(odd){grid-column:1 / -1}
-.kv .k{flex:0 0 auto;color:var(--fg2)}
-.kv .v{flex:1;min-width:0;overflow-wrap:anywhere}
-.host-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding-top:10px;border-top:1px solid var(--b1)}
-.inline-field{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg2);min-width:0}
-.inline-field.wide{width:100%}
-.inline-field.wide .text{flex:1;height:30px}
-.inline-field .num{width:76px;height:28px}
-.host-line{display:flex;align-items:center;gap:8px;font-size:12px;min-width:0}
-.host-line .k{color:var(--fg2);flex:0 0 auto}
+.host-id .name{font-size:13.5px}
+.host-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.rows{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px 12px;align-items:center;font-size:12.5px;line-height:18px}
+.row-k{color:var(--fg2);white-space:nowrap}
+.row-v{min-width:0;overflow-wrap:anywhere}
+.row-v.inline,.row-v.switch-row{display:flex;align-items:center;gap:8px}
+.row-v .text{height:30px}
+.row-v .num{width:84px;height:28px}
+.mono{font:12px/18px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.host-section{display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--b1)}
+.host-procs{margin-top:auto}
+.host.dragging{opacity:.65;border-color:var(--brand);box-shadow:0 0 0 2px color-mix(in srgb,var(--brand) 30%,transparent)}
+.hosts.sorting,.hosts.sorting .grip{cursor:grabbing;user-select:none}
+.hosts.sorting .host:not(.dragging){transition:none}
 .cmd-inline{flex:1;min-width:0;padding:5px 8px;border-radius:7px;background:var(--l2);font:11.5px/16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mosaic{display:inline-block;height:1.05em;min-width:4.5em;max-width:100%;vertical-align:-.18em;border-radius:4px;background-color:var(--mosaic-a);background-image:linear-gradient(45deg,var(--mosaic-b) 25%,transparent 25%,transparent 75%,var(--mosaic-b) 75%),linear-gradient(45deg,var(--mosaic-b) 25%,transparent 25%,transparent 75%,var(--mosaic-b) 75%);background-size:7px 7px;background-position:0 0,3.5px 3.5px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fg) 8%,transparent)}
-.host-procs{display:flex;flex-direction:column;gap:7px;padding-top:10px;border-top:1px solid var(--b1)}
 .block-title{font-size:12px;font-weight:600;color:var(--fg2);display:flex;align-items:center;gap:6px}
-.kv{display:flex;gap:12px;font-size:12.5px}
-.k{flex:0 0 64px;color:var(--fg2)}
-.v{flex:1;min-width:0;overflow-wrap:anywhere}
-.switch-row{display:flex;align-items:center;gap:8px}
 .proc{display:flex;align-items:center;gap:8px;font-size:12.5px}
 .proc .ell{flex:1}
 .failure{font-size:12px;color:var(--err)}
@@ -190,8 +188,8 @@ code{font:11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 }
 @container (max-width:520px){
   .row{flex-wrap:wrap}.what{flex-basis:100%;order:3;padding-left:21px}.who{flex:1 1 auto}
-  .host{flex:1 1 100%;width:auto;padding:12px}
-  .facts{grid-template-columns:1fr}
+  .hosts{grid-template-columns:minmax(0,1fr)}
+  .host{padding:12px}
 }
 `;
 
@@ -214,6 +212,10 @@ class SshHelperPanel extends HTMLElement {
     this.failures = 0;
     this.timer = undefined;
     this.credential = undefined;
+    /** The card being dragged: `{ alias, card, list, pointerId, before }`, or null. */
+    this.drag = null;
+    /** The alias whose drag handle gets focus back after the next redraw. */
+    this.focusHandle = null;
     this.shadowRoot.innerHTML = `<style>${STYLES}</style><div class="frame" style="display:contents"></div>`;
     this.frame = this.shadowRoot.querySelector('.frame');
     this.onVisibility = () => {
@@ -325,10 +327,16 @@ class SshHelperPanel extends HTMLElement {
     // or the focusout catch-up would rebuild the form between the Save
     // button's mousedown and mouseup, dropping both the click and the typed
     // names.
-    if (!force && (this.editing() || this.dialog)) return;
+    // A drag moves cards in the DOM itself; a redraw mid-drag would undo it.
+    if (!force && (this.editing() || this.dialog || this.drag)) return;
     const options = { mode: this.mode };
     if (!tabsFor(this.mode).includes(this.tab)) this.tab = 'hosts';
     const bodyScroll = this.shadowRoot.querySelector('.body')?.scrollTop ?? 0;
+    // A redraw replaces every node: keep a focused drag handle focused, so a
+    // poll never yanks keyboard reordering out from under the user.
+    const active = this.shadowRoot.activeElement;
+    const focusAlias = this.focusHandle ?? (typeof active?.matches === 'function' && active.matches('[data-drag-handle]') ? active.dataset.alias : null);
+    this.focusHandle = null;
     this.frame.innerHTML = [
       renderHeader({ mode: this.mode, busy: this.busy, masked: this.state?.settings?.maskAddresses === true }),
       renderTabs({ mode: this.mode, tab: this.tab, state: this.state }),
@@ -339,6 +347,117 @@ class SshHelperPanel extends HTMLElement {
     ].join('');
     const body = this.shadowRoot.querySelector('.body');
     if (body) body.scrollTop = bodyScroll;
+    if (focusAlias !== null) [...this.shadowRoot.querySelectorAll('[data-drag-handle]')].find((handle) => handle.dataset.alias === focusAlias)?.focus();
+  }
+
+  // ── card order ──────────────────────────────────────────────────────────
+
+  /** The aliases in the order the cards are currently drawn. */
+  cardOrder(list) {
+    return [...list.querySelectorAll(':scope > .host')].map((card) => card.dataset.alias);
+  }
+
+  /**
+   * Save a new card order: reorder the local state at once (so the next
+   * redraw already shows it), then persist it; the answer is the stored state.
+   */
+  saveOrder(order) {
+    const hosts = this.state?.hosts ?? [];
+    if (this.state && hosts.length > 0) {
+      const rank = new Map(order.map((alias, index) => [alias, index]));
+      this.state = { ...this.state, hosts: [...hosts].sort((a, b) => (rank.get(a.alias) ?? Infinity) - (rank.get(b.alias) ?? Infinity)) };
+    }
+    this.render(true);
+    return this.post('order', { order });
+  }
+
+  /**
+   * Pointer drag on a card's handle (mouse, pen and touch alike): the card is
+   * moved in the DOM as the pointer passes the middle of another card, and the
+   * order is saved on release.
+   */
+  startDrag(event, handle) {
+    const card = handle.closest('.host');
+    const list = card?.parentElement;
+    if (!card || !list || event.button !== 0) return;
+    event.preventDefault();
+    try {
+      // Keep receiving moves when the pointer leaves the handle; a failed
+      // capture (no such active pointer) must not cancel the drag.
+      handle.setPointerCapture?.(event.pointerId);
+    } catch {
+      /* drag without capture */
+    }
+    this.drag = { alias: card.dataset.alias, card, list, pointerId: event.pointerId, before: this.cardOrder(list).join('\n') };
+    card.classList.add('dragging');
+    list.classList.add('sorting');
+  }
+
+  moveDrag(event) {
+    const drag = this.drag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    drag.x = event.clientX;
+    drag.y = event.clientY;
+    this.autoScroll();
+    this.reorderAt(event.clientX, event.clientY);
+  }
+
+  /**
+   * Near the top or bottom edge of the scroll area the list scrolls by itself
+   * (and keeps scrolling while the pointer rests there), so a card can be
+   * dragged past what is on screen — the narrow DSH sidebar shows one column.
+   */
+  autoScroll() {
+    const drag = this.drag;
+    const body = this.shadowRoot.querySelector('.body');
+    if (!drag || !body || drag.scrolling) return;
+    const step = () => {
+      const current = this.drag;
+      if (current !== drag) return;
+      const box = body.getBoundingClientRect();
+      const edge = 48;
+      const speed = current.y < box.top + edge ? -Math.ceil((box.top + edge - current.y) / 4) : current.y > box.bottom - edge ? Math.ceil((current.y - box.bottom + edge) / 4) : 0;
+      if (speed === 0 || (speed < 0 && body.scrollTop <= 0) || (speed > 0 && body.scrollTop + body.clientHeight >= body.scrollHeight)) {
+        current.scrolling = false;
+        return;
+      }
+      body.scrollTop += speed;
+      this.reorderAt(current.x, current.y);
+      setTimeout(step, 16);
+    };
+    drag.scrolling = true;
+    setTimeout(step, 16);
+  }
+
+  /** Move the dragged card past the card under the point once the point crosses its middle. */
+  reorderAt(x, y) {
+    const drag = this.drag;
+    if (!drag) return;
+    const hit = this.shadowRoot.elementFromPoint?.(x, y);
+    const target = hit instanceof Element ? hit.closest('.host') : null;
+    if (!target || target === drag.card || target.parentElement !== drag.list) return;
+    const cards = [...drag.list.children];
+    const from = cards.indexOf(drag.card);
+    const to = cards.indexOf(target);
+    const box = target.getBoundingClientRect();
+    const own = drag.card.getBoundingClientRect();
+    // Same row: past the target's horizontal middle; another row: its vertical middle.
+    const sameRow = Math.abs(box.top - own.top) < box.height / 2;
+    const past = sameRow
+      ? (from < to ? x > box.left + box.width / 2 : x < box.left + box.width / 2)
+      : (from < to ? y > box.top + box.height / 2 : y < box.top + box.height / 2);
+    if (past) drag.list.insertBefore(drag.card, from < to ? target.nextSibling : target);
+  }
+
+  endDrag(event) {
+    const drag = this.drag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    this.drag = null;
+    drag.card.classList.remove('dragging');
+    drag.list.classList.remove('sorting');
+    const order = this.cardOrder(drag.list);
+    if (event.type === 'pointerup' && order.join('\n') !== drag.before) void this.saveOrder(order);
+    else this.render(true);
   }
 
   // ── interaction ─────────────────────────────────────────────────────────
@@ -377,6 +496,13 @@ class SshHelperPanel extends HTMLElement {
         if (host) this.openDialog(host);
       } else if (d.dialogCancel !== undefined) this.closeDialog();
     });
+    root.addEventListener('pointerdown', (event) => {
+      const handle = event.target instanceof Element ? event.target.closest('[data-drag-handle]') : null;
+      if (handle) this.startDrag(event, handle);
+    });
+    root.addEventListener('pointermove', (event) => this.moveDrag(event));
+    root.addEventListener('pointerup', (event) => this.endDrag(event));
+    root.addEventListener('pointercancel', (event) => this.endDrag(event));
     root.addEventListener('mousedown', (event) => {
       if (event.target instanceof Element && event.target.matches('[data-dialog-backdrop]') && !this.dialog?.saving) this.closeDialog();
     });
@@ -404,6 +530,19 @@ class SshHelperPanel extends HTMLElement {
       const target = event.target;
       if (event.key === 'Escape') {
         if (this.dialog && !this.dialog.saving) this.closeDialog();
+        return;
+      }
+      // A focused drag handle moves its card with the arrow keys.
+      const handle = target instanceof Element ? target.closest('[data-drag-handle]') : null;
+      if (handle && !this.drag) {
+        const delta = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1, Home: -Infinity, End: Infinity }[event.key];
+        if (delta === undefined) return;
+        event.preventDefault();
+        const aliases = (this.state?.hosts ?? []).map((host) => host.alias);
+        const order = moveAlias(aliases, handle.dataset.alias, Number.isFinite(delta) ? delta : delta < 0 ? -aliases.length : aliases.length);
+        if (order.join('\n') === aliases.join('\n')) return;
+        this.focusHandle = handle.dataset.alias;
+        void this.saveOrder(order);
         return;
       }
       if (event.key === 'Enter' && target instanceof HTMLInputElement && target.form === null) target.blur();

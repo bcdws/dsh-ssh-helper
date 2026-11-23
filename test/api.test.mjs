@@ -63,6 +63,10 @@ const store = {
     return { ...settings };
   },
   host: (alias) => hosts.get(alias) ?? { remark: '', hidden: false, idleTimeoutMs: null },
+  setHostOrder: (order) => {
+    calls.push(`setHostOrder:${JSON.stringify(order)}`);
+    return order;
+  },
   setHost: (alias, patch) => {
     calls.push(`setHost:${alias}:${JSON.stringify(patch)}`);
     Object.assign(hosts.get(alias), patch);
@@ -210,6 +214,14 @@ check('meta-returns-state', meta.payload.state.hosts[0].remark === '生产 Web �
 // pool and only reads state.json, so this never reaches it.
 const closeCalls = () => calls.filter((entry) => entry.startsWith('close:web-host:')).length;
 check('hide-closes-connection', closeCalls() === 1 && calls.at(-1) === 'close:web-host:hidden in the SSH assistant', JSON.stringify(calls.slice(-2)));
+
+// The panel's card order goes to the store; `ssh_hosts` follows it through the pool.
+const ordered = await call({ method: 'POST', url: '/ssh-pool/order', headers: authorized, body: { order: ['prod-1', 'web-host'] } });
+check('post-order', ordered.status === 200 && calls.at(-1) === 'setHostOrder:["prod-1","web-host"]' && Array.isArray(ordered.payload.state?.hosts), `${ordered.status} ${calls.at(-1)}`);
+const badOrder = await call({ method: 'POST', url: '/ssh-pool/order', headers: authorized, body: { order: 'web-host' } });
+check('post-order-not-a-list', badOrder.status === 200 && calls.at(-1) === 'setHostOrder:[]', calls.at(-1));
+const unauthorizedOrder = await call({ method: 'POST', url: '/ssh-pool/order', body: { order: ['web-host'] } });
+check('post-order-needs-token', unauthorizedOrder.status === 403 && calls.at(-1) === 'setHostOrder:[]', `${unauthorizedOrder.status}`);
 check('hide-reports-disconnect', meta.payload.disconnected === true, JSON.stringify(meta.payload).slice(0, 200));
 const hiddenNote = await call({ method: 'POST', url: '/ssh-pool/meta', headers: authorized, body: { alias: 'web-host', remark: '隐藏时只改备注' } });
 check('hidden-note-keeps-connection', hiddenNote.status === 200 && closeCalls() === 1 && hiddenNote.payload.disconnected === undefined, JSON.stringify(calls.slice(-2)));

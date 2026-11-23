@@ -1,6 +1,6 @@
 # dsh-ssh-helper
 
-给 AI 运维个人服务器用的 SSH 工具：常驻连接池、8 个工具、一道防止把机器搞报废的护栏。可以作为 **DSH 插件**，也可以作为标准 **stdio MCP server** 接入任何客户端。
+给 AI 运维个人服务器用的 SSH 工具：常驻连接池、3 个工具、一道防止把机器搞报废的护栏。可以作为 **DSH 插件**，也可以作为标准 **stdio MCP server** 接入任何客户端。
 
 - 每台主机一条常驻连接，断线自动重连；`cd` 和环境变量按调用方隔离。
 - 只用 `~/.ssh/config` 里的密钥或 ssh-agent，不支持密码，不保存私钥。
@@ -74,7 +74,7 @@ npx -y github:bcdws/dsh-ssh-helper#stable panel --open
 
 打开 `http://127.0.0.1:7318/`（端口被占用时顺延）。界面和 DSH 侧边栏的面板是同一个。可以：
 
-- 隐藏主机、打生产标记、写备注、设置单台主机的空闲超时；
+- 隐藏主机、写备注、设置单台主机的空闲超时；拖动卡片左上角的把手排序（也可以聚焦把手后用方向键），`ssh_hosts` 列出主机也按这个顺序；
 - 调整全局设置（输出上限、超时、日志旁路分析、地址打码）；
 - 重命名 Host 和密钥文件（修改前会备份 `~/.ssh/config`）；
 - 查看每个运行中的 MCP 进程及其连接，并手动连接或断开。
@@ -91,20 +91,29 @@ npx -y github:bcdws/dsh-ssh-helper#stable panel --open
 | 工具 | 用途 |
 |---|---|
 | `ssh_hosts` | 列主机、连接状态、最近失败、server 所在机器（`local`） |
-| `ssh_run` | 执行命令；`session` 保持目录和变量，`background` 后台运行 |
-| `ssh_read` / `ssh_grep` / `ssh_glob` | 读文件、搜内容、找文件 |
-| `ssh_write` / `ssh_edit` | 写新文件 / 精确修改 |
+| `ssh_run` | 执行命令；`session` 保持目录和变量，`expectedMs` 给慢操作，`background` 后台运行 |
 | `ssh_transfer` | 上传或下载单个文件（`localPath` 按 server 所在机器解析） |
 
-- **后台模式留下的文件**：`background: true` 会在服务器上留两个文件，结果里都会返回路径：日志（`logPath`）和隐藏脚本 `.dsh-ssh-run-<hash>.sh`（`scriptPath`，存放命令正文，权限 700）。脚本总在插件的日志目录 `~/.local/state/dsh-ssh/logs/`（可用 `DSH_SSH_LOG_DIR` 改），即使用 `logPath` 把日志放到了别处。插件不会删除这两个文件。
-- **生产标记和备注**：只提醒、不拦截。对生产主机做修改类调用时，结果会带 `[PROD]` 提醒；有备注的主机，每次调用结果都会带 `[note]`。MCP 下两者也会放进结构化结果的 `notices` 字段。
+读文件、搜内容、改配置都用 `ssh_run` 里的普通命令（`sed -n`、`grep`、`find`、`sed -i`、heredoc），AI 本来就熟悉这些；插件提供的是连接复用和护栏。
+
+- **后台模式留下的文件**：`background: true` 会在服务器上留两个文件，结果里都会返回路径：日志（`logPath`）和隐藏脚本 `.dsh-ssh-run-<hash>.sh`（`scriptPath`，存放命令正文，权限 700）。两个文件都在插件的日志目录 `~/.local/state/dsh-ssh/logs/`（可用 `DSH_SSH_LOG_DIR` 改）。命令从登录目录启动，需要切目录就写在命令里。插件不会删除这两个文件。
+- **备注**：有备注的主机，每次调用结果都会带 `[note]`，MCP 下也会放进结构化结果的 `notices` 字段。
 - **MCP 结构化结果**：`structuredContent` 不放没有信息量的字段：值为 null 或 false 的字段、为 0 的主机计数，以及 `ssh_run` 的握手耗时、连接复用标记和截止时间推算（命令超时时保留推算）。`outputSchema` 的 `required` 相应放宽，文本内容不变。
 - **MCP 下的 `[policy]`**：`initialize` 的说明里一直有完整规则；`ssh_hosts` 只在第一次调用和命令被拒之后给出全文，其他时候只留一行 `[policy] unchanged…`。DSH 插件每次都给全文。
 - **错误码**：失败时末尾附 `[error: <code>] 下一步建议`，MCP 下也放在 `_meta["dsh-ssh-helper/error"]`。错误码有：`connect_timeout`、`connection_refused`、`closed_before_handshake`、`host_unreachable`、`auth_failed`、`key_unusable`、`host_key_mismatch`、`transport_lost`、`exec_timeout`、`cancelled`、`policy_denied`、`unknown_host`、`local_path`、`invalid_argument`。失败会记到主机的 `lastFailure`。
 
 ## 安全边界
 
-**这不是沙箱。** 护栏只拦 6 类致命操作：递归删除系统目录、`mkfs` / 分区、`dd` 写块设备、覆盖设备或系统关键文件、递归改系统目录权限、`cd` 进系统目录后批量删除。业务目录（`/srv`、`/home`、`/opt`、`/var/www`、`/data`）不拦。
+**这不是沙箱。** 护栏只拦会让机器报废的操作：
+
+- 删除或通配删除 `/`、系统目录树根，以及启动和登录必需的目录（`/etc`、`/usr/bin`、`/usr/lib`、`/boot`、`/etc/ssh`、`/var/lib/dpkg` 等）；
+- 删除或覆写账户文件（`passwd`、`shadow`、`sudoers` 等）、`fstab`、核心程序和 C 库；
+- 格式化、分区、抹除磁盘，`dd` / `cp` / 重定向写块设备；
+- 递归改上述目录的权限；强制卸载必需软件包。
+
+应用配置（`/etc/<app>/`）、`/usr/local/`、业务目录（`/srv`、`/home`、`/opt`、`/var/www`、`/data`）、写 `/proc/sys`、追加写和 `sed -i` 改配置都不拦。
+
+护栏按 shell 实际会做的事判断：通配和花括号按能匹配到的路径算；相对路径按 session 的当前目录和命令里的 `cd` 解析；变量用同一条命令里的赋值、`for` 列表和 session 里 export 的值，没赋值的按空值算（`rm -rf "$DIR"/*` 在 `DIR` 为空时就是删根目录），所以要写成 `${DIR:?}` 或绝对路径。脚本文件和解释器（python、perl）里的命令它看不到。
 
 - 被拒时说明意图交给人决定，不要换等价写法重试。误报按 bug 处理。
 - MCP 下的审批由客户端负责；计划模式拦截只在 DSH 里有。

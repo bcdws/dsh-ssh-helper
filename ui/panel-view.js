@@ -9,12 +9,15 @@
  *
  * Every host is a self-contained card (address, key, status, switches,
  * overrides, failures, sessions, MCP process rows); there is no side panel.
+ * Cards share one layout — a fixed label column, the same sections in the same
+ * order — so cards side by side line up, and they can be dragged into order.
  *
  * Interaction hooks are `data-*` attributes; the element wires them:
  *   data-tab, data-action (+ data-alias, data-pid), data-toggle
  *   (+ data-alias, data-field), data-setting-toggle, data-meta-input
  *   (+ data-alias, data-field), data-setting-input (+ data-scale), data-edit,
- *   data-refresh, data-close-all, dialog: data-dialog-cancel / form submit.
+ *   data-drag-handle (+ data-alias), data-refresh, data-close-all,
+ *   dialog: data-dialog-cancel / form submit.
  *
  * @module dsh-ssh-helper/ui/panel-view
  */
@@ -30,16 +33,16 @@ export const TEXT = {
   disconnect: '断开',
   retry: '重试',
   states: { ready: '已连接', connecting: '连接中', idle: '未连接', down: '已断开', paused: '已暂停' },
-  prod: '生产',
-  prodShort: '只提醒，不拦截',
   hidden: '隐藏',
   visible: '可见',
   sessions: '会话',
   commands: '命令',
   noHosts: '没有可用的 SSH 主机：检查 ~/.ssh/config 或插件配置。',
-  hostsNoteDsh: '「隐藏」后任何会话都看不到、也连不上它，现有连接会在 20 秒后自动断开；每台主机的详情和开关都在卡片上。',
-  hostsNoteMcp: '「隐藏」后任何 MCP 会话都看不到、也连不上它，各进程的现有连接会在 20 秒后自动断开；每台主机的详情、开关和各进程连接都在卡片上。',
-  prodHint: '生产服务器（实际业务在跑）。不拦截命令；agent 在 ssh_hosts 和每次改动类调用的结果里都会看到 [PROD] 提醒，先说明影响、取得你的确认再重启、删除或改配置/数据。',
+  hostsNoteDsh: '「隐藏」后任何会话都看不到、也连不上它，现有连接会在 20 秒后自动断开。拖动卡片左上角的把手可以排序，会话里列出主机也按这个顺序。',
+  hostsNoteMcp: '「隐藏」后任何 MCP 会话都看不到、也连不上它，各进程的现有连接会在 20 秒后自动断开。拖动卡片左上角的把手可以排序，会话里列出主机也按这个顺序。',
+  dragHandle: '拖动排序（聚焦后也可以用方向键移动）',
+  visibility: '可见性',
+  seconds: '秒',
   hiddenHint: '隐藏后 agent 看不到也连不上该主机；现有连接会在 20 秒后自动断开，期间恢复可见则不会断开；这里仍可管理。',
   idleOverride: '空闲超时',
   idleOverrideDesc: '秒；留空跟随全局设置，0 = 永不断开。',
@@ -62,7 +65,7 @@ export const TEXT = {
   followsOther: '跟随其他状态文件，这里的隐藏/设置对它无效',
   closeProcess: '断开它的全部连接',
   sshVisible: 'SSH 工具对会话可见',
-  sshVisibleDesc: '总开关。关闭后 8 个 ssh_* 工具对任何会话（含子 agent）都不再存在，已建立的连接不受影响。',
+  sshVisibleDesc: '总开关。关闭后 3 个 ssh_* 工具对任何会话（含子 agent）都不再存在，已建立的连接不受影响。',
   groupOutput: '输出与上下文',
   groupConnection: '连接与空闲',
   groupPrivacy: '隐私与截图',
@@ -77,7 +80,7 @@ export const TEXT = {
   maxOutputBytesDesc: '每条命令回传的每个流（stdout / stderr）的字节上限，单位 KB；默认 32 KB，超出时保留头尾并标注省略。调小更省上下文。',
   logAnalysis: '日志旁路分析',
   logAnalysisDesc:
-    '开启后，较大的日志读取/搜索/日志类命令会交给一个没有工具的旁路模型分析，主会话只收到摘要；需要原文时在调用里传 analyze:false。日志会先脱敏。默认关闭，敏感日志请保持关闭。',
+    '开启后，输出较大的日志类命令会交给一个没有工具的旁路模型分析，主会话只收到摘要；需要原文时在调用里传 analyze:false。日志会先脱敏。默认关闭，敏感日志请保持关闭。',
   idleTimeout: '空闲超时',
   idleTimeoutDesc: '秒；0 = 永不自动断开。未使用时不创建连接，只有会话真正用到该主机才首次建连。',
   transferTimeout: '文件传输超时',
@@ -85,7 +88,7 @@ export const TEXT = {
   hostKeyPolicy: '主机密钥策略',
   hostKeyPolicyDesc: '来自配置的 hostKeyPolicy，这里只读。',
   policyText:
-    '只拦会让整台机器报废的操作：递归/通配删除系统关键目录、mkfs/分区、dd 或 > 写块设备、覆写系统关键文件、递归 chmod/chown 系统目录。业务目录和普通维护不拦。护栏在工具内部执行，这里不能关闭。',
+    '只拦会让整台机器报废的操作：删除或通配删除 /、系统目录树根和启动/登录必需的目录；删除或覆写账户文件、fstab、核心程序与 C 库；格式化/分区/抹盘、写块设备；递归 chmod/chown 这些目录；强制卸载必需软件包。应用配置、/usr/local 和业务目录不拦。护栏在工具内部执行，这里不能关闭。',
   logExamples: '查日志要有界；数字只是写法示例，不是固定上限',
   counters: { toolCalls: '调用', failures: '失败', policyDenials: '拦截', timeouts: '超时', slowCalls: '慢调用' },
   recentEvents: '最近调用',
@@ -138,6 +141,7 @@ const ICON_PATHS = {
   eye: ['M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z', 'M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z'],
   eyeOff: ['M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z', 'M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z', 'M4 4l16 16'],
   chevron: ['M9 6l6 6-6 6'],
+  grip: ['M9 6h.01', 'M15 6h.01', 'M9 12h.01', 'M15 12h.01', 'M9 18h.01', 'M15 18h.01'],
   power: ['M12 4v8', 'M7.5 6.6a7 7 0 1 0 9 0']
 };
 export const icon = (name, size = 14) =>
@@ -145,8 +149,8 @@ export const icon = (name, size = 14) =>
     .map((d) => `<path d="${d}"/>`)
     .join('')}</svg>`;
 
-const switchHtml = ({ checked, attrs, label, neutral = false, danger = false }) =>
-  `<button type="button" class="switch${neutral ? ' neutral' : ''}${danger ? ' danger' : ''}" role="switch" aria-checked="${checked ? 'true' : 'false'}" aria-label="${esc(label)}" title="${esc(label)}" ${attrs}><span class="knob"></span></button>`;
+const switchHtml = ({ checked, attrs, label, neutral = false }) =>
+  `<button type="button" class="switch${neutral ? ' neutral' : ''}" role="switch" aria-checked="${checked ? 'true' : 'false'}" aria-label="${esc(label)}" title="${esc(label)}" ${attrs}><span class="knob"></span></button>`;
 
 const badge = (text, kind = '', title = '') => `<span class="badge ${kind}"${title ? ` title="${esc(title)}"` : ''}>${esc(text)}</span>`;
 
@@ -235,7 +239,8 @@ function processRows(host, state) {
     .join('');
 }
 
-const field = (label, value) => `<div class="kv"><span class="k">${esc(label)}</span><span class="v">${value}</span></div>`;
+/** One label/value row of a card; every card uses the same label column. */
+const row = (label, value, extra = '') => `<div class="row-k">${esc(label)}</div><div class="row-v${extra}">${value}</div>`;
 
 /** The endpoint as text; the masked view never puts it in the DOM at all. */
 export function addressText(host) {
@@ -253,10 +258,26 @@ export function mosaicHtml(host) {
 }
 
 /**
- * One host as a self-contained card: identity, address and key, status,
- * counters, the two switches and the per-host overrides, failures, the last
- * command, sessions, and (MCP) the process rows. Everything is visible at
- * once — no side panel to open.
+ * A new card order with `alias` moved `delta` places (keyboard reordering).
+ * Out-of-range moves are clamped; an unknown alias leaves the order as is.
+ */
+export function moveAlias(aliases, alias, delta) {
+  const order = [...aliases];
+  const from = order.indexOf(alias);
+  if (from < 0) return order;
+  const to = Math.max(0, Math.min(order.length - 1, from + delta));
+  order.splice(from, 1);
+  order.splice(to, 0, alias);
+  return order;
+}
+
+/**
+ * One host as a self-contained card. Every card has the same skeleton, so
+ * cards side by side line up: a header (drag handle, state dot, name, actions),
+ * the facts (address, key, host key, state) and the settings (visibility, idle
+ * override, remark) always take the same rows; then whatever varies (counters,
+ * failures, last command, sessions); and in MCP mode the per-process rows,
+ * pinned to the bottom. All labels share one column.
  */
 export function renderHostCard(host, { state, mode }) {
   const { key } = hostState(host);
@@ -275,51 +296,66 @@ export function renderHostCard(host, { state, mode }) {
   ]
     .filter(Boolean)
     .join('');
-  return `<article class="host" data-alias="${alias}">
-  <header class="host-head">
-    <span class="dot ${key}"></span>
-    <div class="host-id"><span class="name ell">${alias}</span>${host.prod ? badge('PROD', 'prod', TEXT.prodHint) : ''}${host.hidden ? badge(TEXT.hidden, 'muted', TEXT.hiddenHint) : ''}</div>
-    <div class="host-actions">${primaryAction(host, state, mode)}${editable ? `<button type="button" class="btn sm ghost" data-edit="${alias}">${TEXT.editShort}</button>` : ''}</div>
-  </header>
-  <div class="facts">
-    ${field(TEXT.address, masked ? mosaicHtml(host) : esc(addressText(host)))}
-    ${field(TEXT.key, esc(host.keyName ?? '—'))}
-    ${editable ? '' : field(TEXT.source, TEXT.sourceConfig)}
-    ${host.hostKey ? field(TEXT.hostKey, `${esc(host.hostKey.status)}${host.hostKey.type ? ` · ${esc(host.hostKey.type)}` : ''}`) : ''}
-    ${field(TEXT.state, hostStatus(host))}
-  </div>
-  ${counters ? `<div class="muted small">${counters}</div>` : ''}
-  <div class="host-controls">
-    <div class="switch-row" title="${esc(TEXT.hiddenHint)}"><span class="toggle-label${host.hidden ? '' : ' on'}">${TEXT.visible}</span>${switchHtml({ checked: host.hidden === true, neutral: true, label: TEXT.hiddenHint, attrs: `data-toggle data-field="hidden" data-alias="${alias}"` })}<span class="toggle-label${host.hidden ? ' on' : ''}">${TEXT.hidden}</span></div>
-    <div class="switch-row" title="${esc(TEXT.prodHint)}">${switchHtml({ checked: host.prod === true, danger: true, label: TEXT.prodHint, attrs: `data-toggle data-field="prod" data-alias="${alias}"` })}<span class="toggle-label prod${host.prod ? ' on' : ''}">${TEXT.prod}</span>${host.prod ? `<span class="hint">${TEXT.prodShort}</span>` : ''}</div>
-    <label class="inline-field" title="${esc(TEXT.idleOverrideDesc)}"><span>${TEXT.idleOverride}</span><input class="num" type="number" min="0" inputmode="numeric" placeholder="全局 ${effective}" value="${esc(idle)}" data-meta-input data-field="idleTimeoutMs" data-alias="${alias}"></label>
-  </div>
-  <label class="inline-field wide"><span>${TEXT.remark}</span><input class="text" maxlength="500" placeholder="${TEXT.remarkPlaceholder}" value="${esc(host.remark ?? '')}" data-meta-input data-field="remark" data-alias="${alias}"></label>
-  ${failures}
-  ${
-    host.lastCommand
-      ? `<div class="host-line"><span class="k">${TEXT.lastCommand}</span><code class="cmd-inline" title="${esc(host.lastCommand)}">${esc(host.lastCommand)}</code><span class="muted small">${esc(age(host.lastCommandAgeSeconds ?? host.lastCommandSeconds))}</span></div>`
-      : ''
-  }
-  ${
+  const facts = [
+    row(TEXT.address, masked ? mosaicHtml(host) : `<span class="mono">${esc(addressText(host))}</span>`),
+    row(TEXT.key, esc(host.keyName ?? '—')),
+    editable ? '' : row(TEXT.source, TEXT.sourceConfig),
+    row(TEXT.hostKey, host.hostKey ? `${esc(host.hostKey.status)}${host.hostKey.type ? ` · ${esc(host.hostKey.type)}` : ''}` : '<span class="muted">—</span>'),
+    row(TEXT.state, hostStatus(host))
+  ].join('');
+  const settings = [
+    row(
+      TEXT.visibility,
+      `<span class="toggle-label${host.hidden ? '' : ' on'}">${TEXT.visible}</span>${switchHtml({ checked: host.hidden === true, neutral: true, label: TEXT.hiddenHint, attrs: `data-toggle data-field="hidden" data-alias="${alias}"` })}<span class="toggle-label${host.hidden ? ' on' : ''}">${TEXT.hidden}</span>`,
+      ' switch-row'
+    ),
+    row(
+      TEXT.idleOverride,
+      `<input class="num" type="number" min="0" inputmode="numeric" placeholder="全局 ${effective}" value="${esc(idle)}" title="${esc(TEXT.idleOverrideDesc)}" aria-label="${esc(TEXT.idleOverride)}" data-meta-input data-field="idleTimeoutMs" data-alias="${alias}"><span class="muted small">${TEXT.seconds}</span>`,
+      ' inline'
+    ),
+    row(
+      TEXT.remark,
+      `<input class="text" maxlength="500" placeholder="${TEXT.remarkPlaceholder}" value="${esc(host.remark ?? '')}" aria-label="${esc(TEXT.remark)}" data-meta-input data-field="remark" data-alias="${alias}">`
+    )
+  ].join('');
+  const lastCommand = host.lastCommand
+    ? row(TEXT.lastCommand, `<code class="cmd-inline" title="${esc(host.lastCommand)}">${esc(host.lastCommand)}</code><span class="muted small">${esc(age(host.lastCommandAgeSeconds ?? host.lastCommandSeconds))}</span>`, ' inline')
+    : '';
+  // Everything that varies from host to host sits below the fixed part, so
+  // the facts and settings of cards side by side stay level.
+  const activity =
+    counters || failures || lastCommand
+      ? `<div class="host-section">${counters ? `<div class="muted small">${counters}</div>` : ''}${failures}${lastCommand ? `<div class="rows">${lastCommand}</div>` : ''}</div>`
+      : '';
+  const sessionList =
     sessions.length > 0
-      ? `<div class="host-procs"><div class="block-title">${TEXT.sessions} <span class="count">${sessions.length}</span></div>${sessions
+      ? `<div class="host-section"><div class="block-title">${TEXT.sessions} <span class="count">${sessions.length}</span></div>${sessions
           .map(
             (session) =>
               `<div class="proc"><span class="dot ${session.alive === false ? 'down' : 'ready'}"></span><span class="ell">${esc(session.name)} <span class="muted small">${esc(session.ownerShort ?? session.owner ?? '')}</span></span><span class="muted small">${esc(session.commands ?? 0)} ${TEXT.commands}${session.idleSeconds !== undefined ? ` · 空闲 ${esc(span(session.idleSeconds))}` : ''}</span></div>`
           )
           .join('')}</div>`
-      : ''
-  }
-  ${mode === 'mcp' ? `<div class="host-procs"><div class="block-title">${TEXT.perProcess}</div>${processRows(host, state)}</div>` : ''}
+      : '';
+  return `<article class="host" data-alias="${alias}">
+  <header class="host-head">
+    <button type="button" class="grip" data-drag-handle data-alias="${alias}" aria-label="${esc(TEXT.dragHandle)}：${alias}" title="${esc(TEXT.dragHandle)}">${icon('grip', 16)}</button>
+    <span class="dot ${key}"></span>
+    <div class="host-id"><span class="name ell">${alias}</span>${host.hidden ? badge(TEXT.hidden, 'muted', TEXT.hiddenHint) : ''}</div>
+    <div class="host-actions">${primaryAction(host, state, mode)}${editable ? `<button type="button" class="btn sm ghost" data-edit="${alias}">${TEXT.editShort}</button>` : ''}</div>
+  </header>
+  <div class="rows">${facts}</div>
+  <div class="host-section"><div class="rows">${settings}</div></div>
+  ${activity}
+  ${sessionList}
+  ${mode === 'mcp' ? `<div class="host-section host-procs"><div class="block-title">${TEXT.perProcess}</div>${processRows(host, state)}</div>` : ''}
 </article>`;
 }
 
 export function renderHosts(state, { mode }) {
   const hosts = state?.hosts ?? [];
   const hidden = hosts.filter((host) => host.hidden).length;
-  const prod = hosts.filter((host) => host.prod).length;
-  const chips = [hidden ? badge(`${hidden} 台隐藏`, 'muted') : '', prod ? badge(`${prod} 台生产`, 'prod') : ''].join('');
+  const chips = hidden ? badge(`${hidden} 台隐藏`, 'muted') : '';
   return `<section class="pane">
   <div class="note">${mode === 'mcp' ? TEXT.hostsNoteMcp : TEXT.hostsNoteDsh}${chips ? ` <span class="chips">${chips}</span>` : ''}</div>
   ${hosts.length === 0 ? `<div class="empty">${TEXT.noHosts}</div>` : `<div class="hosts">${hosts.map((host) => renderHostCard(host, { state, mode })).join('')}</div>`}

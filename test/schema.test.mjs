@@ -30,12 +30,8 @@ let pass = 0;
 const failures = [];
 const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: ${detail}`));
 
-check('tool-count', tools.length === 8, JSON.stringify(tools.map((tool) => tool.name)));
-check(
-  'file-tools-present',
-  ['ssh_read', 'ssh_write', 'ssh_edit', 'ssh_glob', 'ssh_grep'].every((name) => tools.some((tool) => tool.name === name)),
-  JSON.stringify(tools.map((tool) => tool.name))
-);
+// Three tools: the shell does the file work, so there are no separate file tools.
+check('tool-names', JSON.stringify(tools.map((tool) => tool.name)) === '["ssh_hosts","ssh_run","ssh_transfer"]', JSON.stringify(tools.map((tool) => tool.name)));
 
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value ?? undefined);
 
@@ -71,11 +67,7 @@ check('hosts-required', byName.get('ssh_hosts').parameters.required === undefine
 check('run-required', JSON.stringify(byName.get('ssh_run').parameters.required) === '["host","command"]', JSON.stringify(byName.get('ssh_run').parameters.required));
 check('transfer-required', JSON.stringify(byName.get('ssh_transfer').parameters.required) === '["direction","host","localPath","remotePath"]', JSON.stringify(byName.get('ssh_transfer').parameters.required));
 check('session-one-of', JSON.stringify(byName.get('ssh_run').parameters.properties.session.oneOf) === '[{"type":"string"},{"type":"boolean"}]', JSON.stringify(byName.get('ssh_run').parameters.properties.session));
-check('read-required', JSON.stringify(byName.get('ssh_read').parameters.required) === '["host","path"]', JSON.stringify(byName.get('ssh_read').parameters.required));
-check('write-required', JSON.stringify(byName.get('ssh_write').parameters.required) === '["host","path","content"]', JSON.stringify(byName.get('ssh_write').parameters.required));
-check('edit-required', JSON.stringify(byName.get('ssh_edit').parameters.required) === '["host","path"]', JSON.stringify(byName.get('ssh_edit').parameters.required));
-check('glob-required', JSON.stringify(byName.get('ssh_glob').parameters.required) === '["host","pattern"]', JSON.stringify(byName.get('ssh_glob').parameters.required));
-check('grep-required', JSON.stringify(byName.get('ssh_grep').parameters.required) === '["host","pattern"]', JSON.stringify(byName.get('ssh_grep').parameters.required));
+check('run-parameters', JSON.stringify(Object.keys(byName.get('ssh_run').parameters.properties)) === '["host","command","session","analyze","expectedMs","background"]', JSON.stringify(Object.keys(byName.get('ssh_run').parameters.properties)));
 check('direction-enum', JSON.stringify(byName.get('ssh_transfer').parameters.properties.direction.enum) === '["upload","download"]', JSON.stringify(byName.get('ssh_transfer').parameters.properties.direction));
 
 // Every schema must survive JSON round-trip unchanged (no cycles, no functions).

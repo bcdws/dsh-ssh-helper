@@ -183,6 +183,9 @@ check('setup-failure-state', broken.state === 'down' && typeof broken.lastError 
   const a = await shell.run(`mkdir -p '${work}/sub dir' && cd '${work}/sub dir' && export DSH_T_VAR=alpha DSH_T_TOKEN=secret && echo to-err >&2 && echo out`, opts);
   check('local-stderr-clean', a.stderr === 'to-err\n' && a.stdout === 'out\n', JSON.stringify({ stderr: a.stderr, stdout: a.stdout }));
   check('local-cwd', a.cwd === `${work}/sub dir`, String(a.cwd));
+  // The guard reads the session's exports to resolve `$VAR` targets; credential-like names never reach it.
+  check('local-variables', shell.variables.DSH_T_VAR === 'alpha' && !('DSH_T_TOKEN' in shell.variables), JSON.stringify(shell.variables));
+  check('peek-session', local.peekSession('main', 'owner-a') === shell && local.peekSession('main', 'owner-z') === undefined && local.peekSession('other', 'owner-a') === undefined, 'peek finds only a live session and never creates one');
   const b = await shell.run('pwd; echo "var=$DSH_T_VAR tok=${DSH_T_TOKEN:-unset}"; exec 2>/dev/null; cd /', opts);
   check('local-carry-over', b.stdout === `${work}/sub dir\nvar=alpha tok=unset\n`, JSON.stringify(b.stdout));
   check('local-state-despite-stderr-redirect', b.cwd === '/', String(b.cwd));
@@ -245,54 +248,11 @@ check('setup-failure-state', broken.state === 'down' && typeof broken.lastError 
       started.scriptPath === join(logDir, scripts[0] ?? '') && existsSync(started.scriptPath) && readFileSync(started.scriptPath, 'utf8').includes('echo bg-hello'),
       String(started.scriptPath)
     );
-    // An explicit logPath is honoured; the script still goes to the plugin's
-    // log directory, not next to the log, and its returned path says so.
-    mkdirSync(join(work, 'custom'));
-    const explicit = join(work, 'custom', 'explicit.log');
-    const second = await local.background('echo explicit-line', { logPath: explicit });
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    check('background-explicit-log', second.logPath === explicit && existsSync(explicit) && readFileSync(explicit, 'utf8').includes('explicit-line'), String(second.logPath));
-    check(
-      'background-explicit-log-script-in-log-dir',
-      typeof second.scriptPath === 'string' && second.scriptPath.startsWith(`${logDir}/.dsh-ssh-run-`) && existsSync(second.scriptPath) && second.scriptPath !== started.scriptPath && readdirSync(join(work, 'custom')).join() === 'explicit.log',
-      `${second.scriptPath} | custom: ${JSON.stringify(readdirSync(join(work, 'custom')))}`
-    );
   } finally {
     if (previousLogDir === undefined) delete process.env.DSH_SSH_LOG_DIR;
     else process.env.DSH_SSH_LOG_DIR = previousLogDir;
     rmSync(work, { recursive: true, force: true });
   }
-}
-
-// 4a-3. background() refuses a log path the file tools would also refuse.
-{
-  const local = new HostConnection('h', spec, config, logger);
-  connections.push(local);
-  local.ensure = async () => {
-    throw new Error('the guard must run before any connection');
-  };
-  let refused = null;
-  try {
-    await local.background('echo x', { logPath: '/boot/grub/grub.cfg' });
-  } catch (error) {
-    refused = error;
-  }
-  check('background-refuses-boot-log', refused !== null && refused.code === 'POLICY_DENY' && refused.rule === 'danger.write-system', String(refused?.message ?? 'allowed'));
-  let deviceRefused = null;
-  try {
-    await local.background('echo x', { logPath: '/dev/sda' });
-  } catch (error) {
-    deviceRefused = error;
-  }
-  check('background-refuses-device-log', deviceRefused !== null && deviceRefused.rule === 'danger.write-device', String(deviceRefused?.message ?? 'allowed'));
-  // The plugin's own default directory is ordinary work.
-  let defaultOk = null;
-  try {
-    await local.background('echo x', { logPath: '/root/.local/state/dsh-ssh/logs/app.log' });
-  } catch (error) {
-    defaultOk = error;
-  }
-  check('background-allows-default-dir', defaultOk === null || !/policy/.test(String(defaultOk.message)), String(defaultOk?.message ?? ''));
 }
 
 // 4b. Host status exposes the reconnect pause state.
