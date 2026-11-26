@@ -50,6 +50,12 @@ const check = (name, ok, detail) => (ok ? (pass += 1) : failures.push(`${name}: 
   annotateError(error);
   check('annotate-marker-once', error.message.split('[error: auth_failed]').length === 2, error.message);
   check('annotate-fields', error.failureCode === 'auth_failed' && error.retryable === false && error.failureHint.includes('IdentityFile'), JSON.stringify(error));
+  const missing = annotateError(new Error('local file not found: /srv/build/app.bin'));
+  check(
+    'local-path-names-server',
+    [`[error: local_path]`, hostname(), `, ${process.platform})`, `cwd ${process.cwd()};`].every((part) => missing.message.includes(part)) && missing.failureHint.includes(hostname()),
+    missing.message
+  );
   const early = FAILURE_CODES.closed_before_handshake;
   check('early-close-retryable', early.retryable === true && /never ran/.test(early.hint) && /retry is safe/.test(early.hint), JSON.stringify(early));
   check('transport-lost-still-cautious', FAILURE_CODES.transport_lost.retryable === true && /already ran/.test(FAILURE_CODES.transport_lost.hint), FAILURE_CODES.transport_lost.hint);
