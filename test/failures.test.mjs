@@ -7,6 +7,7 @@ import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { annotateError, classifyError, FAILURE_CODES } from '../lib/errors.js';
 import { createTools } from '../lib/tools.js';
+import { isForeignLocalPath } from '../lib/transfer.js';
 import { MetadataStore } from '../lib/store.js';
 import { SshPool } from '../lib/pool.js';
 import { toMcpError, toMcpResult, ERROR_META_KEY } from '../mcp/server.js';
@@ -202,6 +203,45 @@ const firstText = (tool, args, value) => tool.output.render(args, value)[0].text
   check('early-close-marker', message.includes('[error: closed_before_handshake]') && !message.includes('transport_lost'), message);
   check('early-close-recorded', pool.noted.at(-1)?.code === 'closed_before_handshake', JSON.stringify(pool.noted));
 }
+// ── download to the other system's path: refused, nothing written ─────────
+{
+  const cases = [
+    ['win32', '/home/me/app.bin', true],
+    ['win32', '/mnt/c/app.bin', true],
+    ['win32', 'C:\\tmp\\app.bin', false],
+    ['win32', 'C:/tmp/app.bin', false],
+    ['win32', '\\\\wsl.localhost\\Debian\\app.bin', false],
+    ['win32', '//wsl.localhost/Debian/app.bin', false],
+    ['win32', 'out/app.bin', false],
+    ['linux', 'C:\\tmp\\app.bin', true],
+    ['linux', 'c:/tmp/app.bin', true],
+    ['linux', '\\\\wsl.localhost\\Debian\\app.bin', true],
+    ['darwin', 'D:\\app.bin', true],
+    ['linux', '/home/me/app.bin', false],
+    ['linux', '//srv/app.bin', false],
+    ['linux', 'out/app.bin', false]
+  ];
+  for (const [platform, path, expected] of cases) check(`foreign-${platform}-${path}`, isForeignLocalPath(path, platform) === expected, `expected ${expected}`);
+
+  const pool = fakePool();
+  let connected = 0;
+  pool.connection = () => ({
+    ensure: async () => {
+      connected += 1;
+      throw new Error('must not connect');
+    }
+  });
+  const localPath = process.platform === 'win32' ? '/tmp/app.bin' : 'C:\\tmp\\app.bin';
+  let message = '';
+  try {
+    await toolsFor(pool).get('ssh_transfer').execute({ host: 'web', direction: 'download', localPath, remotePath: '/tmp/app.bin' }, {});
+  } catch (error) {
+    message = error.message;
+  }
+  check('foreign-download-refused', connected === 0 && message.includes('download refused') && message.includes('[error: local_path]') && message.includes(hostname()), message);
+  check('foreign-download-recorded', pool.noted.at(-1)?.code === 'local_path', JSON.stringify(pool.noted));
+}
+
 // ── per-call cap: answer before the client gives up, never kill ───────────
 {
   const seen = [];
